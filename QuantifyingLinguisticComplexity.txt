@@ -1,2 +1,8 @@
 Temnikova, https://wlv.openrepository.com/server/api/core/bitstreams/0c87d3c4-7c39-4996-a189-3e98fdf70544/content
--44: 
+-44: outlines measures of linguistic complexity by type, clarifies difference between human readers and NLP
+-44: the most relevant lexical measures seem to be rich vocabulary, long words, infrequent terms, abstract concepts (semantic?), figurative language (semantic?)
+-44: the most relevant syntactic measures seem to be sentence length, syntax complexity, passive voice, negative constructions
+
+Tweedie, https://link.springer.com/article/10.1023/A:1001749303137
+-325: word token is an instance of a particular word type, in other words the number of tokens is frequency of type (i.e., a word)
+-325: defines TTR as TTR(N)=V(N)/N, a measure 
