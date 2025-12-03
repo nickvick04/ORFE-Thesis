@@ -5,4 +5,10 @@ Temnikova, https://wlv.openrepository.com/server/api/core/bitstreams/0c87d3c4-7c
 
 Tweedie, https://link.springer.com/article/10.1023/A:1001749303137
 -325: word token is an instance of a particular word type, in other words the number of tokens is frequency of type (i.e., a word)
--325: defines TTR as TTR(N)=V(N)/N, a measure 
+-325: defines TTR as TTR(N)=V(N)/N, a measure of the number of unique tokens (words) relative to length of text (i.e., vocabulary size)
+
+Vickery Reflections
+-Might want to use either Zipf curve tails or age of acquisition, as there is likely overlap
+-Might want to use either parse tree depth or ICS, as there is likely overlap
+-Determine whether substantive quality is feasibly quantified
+-Test my quantification system against qualitative rankings of text quality
