@@ -12,3 +12,5 @@ Vickery Reflections
 -Might want to use either parse tree depth or ICS, as there is likely overlap
 -Determine whether substantive quality is feasibly quantified
 -Test my quantification system against qualitative rankings of text quality
+
+-Need to figure out how to strip emojis from text for lexical analysis
