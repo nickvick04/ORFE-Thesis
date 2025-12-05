@@ -14,3 +14,5 @@ Vickery Reflections
 -Test my quantification system against qualitative rankings of text quality
 
 -Need to figure out how to strip emojis from text for lexical analysis
+-Do I want to require the first letter be capital in a complete sentence?
+-Language tool might be useless
