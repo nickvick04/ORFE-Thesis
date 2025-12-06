@@ -15,7 +15,9 @@ Vickery Reflections
 
 -Need to figure out how to strip emojis from text for lexical analysis
 -Do I want to require the first letter be capital in a complete sentence?
+-Should I only compute parse tree depth for complete sentences?
 
 Decisions:
 -TweetTokenizer
 -Comma heuristic in subordinator logic for is_complete_sentence, edge cases
+
