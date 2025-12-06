@@ -18,4 +18,4 @@ Vickery Reflections
 
 Decisions:
 -TweetTokenizer
--Comma heuristic in subordinator logic for is_complete_sentence
+-Comma heuristic in subordinator logic for is_complete_sentence, edge cases
