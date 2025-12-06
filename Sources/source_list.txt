@@ -1,3 +1,6 @@
+Start:
+-NB. If you publish work that uses NLTK, please cite the NLTK book as follows: Bird, Steven, Edward Loper and Ewan Klein (2009), Natural Language Processing with Python. O’Reilly Media Inc.
+
 12/4/25:
 -https://www.nltk.org/book/ch05.html
 -https://www.ling.upenn.edu/courses/Fall_2003/ling001/penn_treebank_pos.html
