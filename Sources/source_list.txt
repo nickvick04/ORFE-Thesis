@@ -8,3 +8,4 @@ Start:
 
 12/7/25:
 -Bird, 303
+-https://convokit.cornell.edu/documentation/tutorial.html
