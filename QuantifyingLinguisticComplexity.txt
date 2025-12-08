@@ -21,3 +21,17 @@ Decisions:
 -TweetTokenizer
 -Comma heuristic in subordinator logic for is_complete_sentence, edge cases
 
+
+https://caes.hku.hk/ajal/index.php/ajal/article/view/681/629
+-
+
+
+Lu, https://onlinelibrary.wiley.com/doi/epdf/10.5054/tq.2011.240859
+-There are broadly 4 categories of syntactic complexity
+-Length of production: MLC (num words/num clauses), MLS (num words/num sentences), MLT (num words/num T-units)
+-Sentence complexity: clauses per sentence
+-Subordination: C/T (clauses/num T-units), CT/T (num complex T-units/num T units), DC/C, DC/T
+-Coordination: CP/C (coordinate phrases per clause), CP/T, T/S
+-Particular Structures: CN/C (num complex nominals / num clauses), CN/T, VP/T
+
+-Count incomplete sentences as sentence fragments, use in metrics (see pg 44)

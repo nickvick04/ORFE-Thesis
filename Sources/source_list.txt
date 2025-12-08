@@ -12,7 +12,7 @@ Start:
 -https://stanfordnlp.github.io/stanza/constituency.html
 -Page 7, https://libjournals.unca.edu/ncur/wp-content/uploads/2021/03/2549-Peterson-Madeline-FINAL.pdf#:~:text=In%20the%20current%20study%2C%20higher%20subordination%20index,was%20longer%20and%20contained%20more%20complex%20syntax.
 -https://universaldependencies.org/u/dep/index.html
--
+-https://caes.hku.hk/ajal/index.php/ajal/article/view/681/629
 
 
 
