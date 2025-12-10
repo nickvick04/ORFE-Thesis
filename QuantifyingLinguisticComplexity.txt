@@ -17,6 +17,15 @@ Vickery Reflections
 -Do I want to require the first letter be capital in a complete sentence?
 -Should I only compute parse tree depth for complete sentences?
 
+-Could use readability scale to determine run ons
+
+
+-Look into Automatic Essay Scorers (AES)
+-Look into Bilingual Evaluation Understudy (BLEU)
+-Incorporate absolute vs. relative complexity distinction, 31
+-Look to Marco et al. for processing, 8
+
+
 Decisions:
 -TweetTokenizer
 -Comma heuristic in subordinator logic for is_complete_sentence, edge cases
