@@ -11,25 +11,24 @@ import csv
 INPUT_PATH = "NAWL_1.2_lemmatized_for_research.csv"
 
 def clean_nawl_csv(input_path, output_path):
-    '''Function that takes in a file path and outputs'''
+    '''Function that takes in a file containing multiple columns and outputs the values as 
+     a single column to a clean csv file.'''
 
-    cleaned_rows = []
+    word_list = []
     # open, read, and store each word in a list
     with open(input_path, "r", encoding="latin-1") as infile:
-        for line in infile:
-            parts = [
-                # strip whitespace and lowercase each word
-                word.strip().lower()
-                # remove whitespace and newlines, splitting line into words based on commas
-                for word in line.strip().split(",")
-            ]
+        reader = csv.reader(infile)
+        for row in reader:
+            for word in row:
+                w = word.strip() # strip whitespace
+                if w:
+                    word_list.append(w)
 
-            cleaned_rows.append(parts)
-    
     # write each word as a new row in a clean csv file
     with open(output_path, "w", encoding= "utf-8", newline="") as outfile:
         writer = csv.writer(outfile)
-        writer.writerows(cleaned_rows)
+        for word in word_list:
+            writer.writerow([word])
 
 # main function
 if __name__ == "__main__":
