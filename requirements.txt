@@ -1,0 +1,10 @@
+spacy
+numpy
+pandas
+tqdm
+networkx
+seaborn
+scikit-learn
+wordfreq
+lexical-diversity
+nltk
