@@ -15,7 +15,7 @@ def clean_nawl_csv(input_path, output_path):
 
     cleaned_rows = []
     # open, read, and store each word in a list
-    with open(input_path, "r") as infile:
+    with open(input_path, "r", encoding="latin-1") as infile:
         for line in infile:
             parts = [
                 # strip whitespace and lowercase each word
@@ -27,7 +27,7 @@ def clean_nawl_csv(input_path, output_path):
             cleaned_rows.append(parts)
     
     # write each word as a new row in a clean csv file
-    with open(output_path, "w", newline="") as outfile:
+    with open(output_path, "w", encoding= "utf-8", newline="") as outfile:
         writer = csv.writer(outfile)
         writer.writerows(cleaned_rows)
 
