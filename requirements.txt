@@ -8,3 +8,4 @@ scikit-learn
 wordfreq
 lexical-diversity
 nltk
+stanza
