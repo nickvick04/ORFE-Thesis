@@ -24,6 +24,7 @@ Vickery Reflections
 -Look into Bilingual Evaluation Understudy (BLEU)
 -Incorporate absolute vs. relative complexity distinction, 31
 -Look to Marco et al. for processing, 8
+-Look to Evelyn M for processing
 
 
 Decisions:
