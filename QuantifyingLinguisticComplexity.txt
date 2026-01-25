@@ -26,6 +26,7 @@ Vickery Reflections
 -Look to Marco et al. for processing, 8
 -Look to Evelyn M for processing
 
+Parenting not found
 
 Decisions:
 -TweetTokenizer
