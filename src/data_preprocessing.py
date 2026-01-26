@@ -149,6 +149,6 @@ def preprocess_df(df):
     df = df[df["text"].str.contains(HAS_LETTER_RE, regex=True)]
 
     # final tokenized, lemmatized, and cleaned set
-    df["final"] = df["text"].apply(clean_tokens_lexical)
+    df["cleaned_tokens"] = df["text"].apply(clean_tokens_lexical)
 
     return df
