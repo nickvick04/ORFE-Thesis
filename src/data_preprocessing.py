@@ -132,9 +132,9 @@ def clean_tokens_lexical(text):
     return lemmatized
 
 # ----------------------------------------------------------------------------------------
-# Pre-Processing Function
+# Pre-Processing Functions
 # ----------------------------------------------------------------------------------------
-def preprocess_df(df):
+def lexical_preprocessing_df(df):
     '''Function that pre-processes the data in a given dataframe by removing
     deleted/removed utterances, bot utterances, and utterances not containing letters.
     Then, the remaining textual data is tokenized, lemmatized, and cleaned.'''
