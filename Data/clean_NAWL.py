@@ -27,6 +27,10 @@ def clean_nawl_csv(input_path, output_path):
     # write each word as a new row in a clean csv file
     with open(output_path, "w", encoding= "utf-8", newline="") as outfile:
         writer = csv.writer(outfile)
+
+        # write header
+        writer.writerow(["word"])
+
         for word in word_list:
             writer.writerow([word])
 
