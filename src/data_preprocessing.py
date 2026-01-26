@@ -26,8 +26,6 @@ from nltk.corpus import wordnet
 # ----------------------------------------------------------------------------------------
 # Format Data
 # ----------------------------------------------------------------------------------------
-corpus = Corpus(filename=download("subreddit-Cornell"))
-
 def corpus_to_df(corpus):
     '''Function to convert the convokit corpus to a pandas dataframe structure.'''
 
@@ -140,23 +138,17 @@ def preprocess_df(df):
     '''Function that pre-processes the data in a given dataframe by removing
     deleted/removed utterances, bot utterances, and utterances not containing letters.
     Then, the remaining textual data is tokenized, lemmatized, and cleaned.'''
-
+    
     # remove deleted/removed utterances
     df = df[~df["text"].str.lower().isin({"[deleted]", "[removed]"})]
 
     # remove bot authored utterances
-    df = df[~df["text"].str.contains(BOT_TEXT_RE)]
+    df = df[~df["text"].str.contains(BOT_TEXT_RE, regex=True)]
 
     # remove utterances without a letter
-    df = df[df["text"].str.contains(HAS_LETTER_RE)]
+    df = df[df["text"].str.contains(HAS_LETTER_RE, regex=True)]
 
-    # tokenize
-    df["tokens"] = df["text"].apply(tokenize)
-
-    # lemmatize
-    df["lemmas"] = df["tokens"].apply(lemmatize)
-
-    # final
+    # final tokenized, lemmatized, and cleaned set
     df["final"] = df["text"].apply(clean_tokens_lexical)
 
     return df
