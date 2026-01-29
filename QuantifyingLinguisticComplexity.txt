@@ -46,3 +46,8 @@ Lu, https://onlinelibrary.wiley.com/doi/epdf/10.5054/tq.2011.240859
 -Particular Structures: CN/C (num complex nominals / num clauses), CN/T, VP/T
 
 -Count incomplete sentences as sentence fragments, use in metrics (see pg 44)
+
+
+
+
+-Create trees then pass into analytical functions to save compute power/time
