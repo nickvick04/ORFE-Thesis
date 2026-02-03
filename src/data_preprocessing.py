@@ -57,7 +57,7 @@ BOT_TEXT_PATTERNS = [
 ]
 
 BOT_TEXT_RE = re.compile("|".join(BOT_TEXT_PATTERNS), flags=re.IGNORECASE)
-URL_RE = re.compile(r"(https?://[^\s\)\]\}]+|www\.[^\s\)\]\}]+)(?=[\s\.\!\?,;:]|$)")
+URL_RE = re.compile(r"https?://[^\s\)\]\}]+(?<![.,!?;:])|www\.[^\s\)\]\}]+(?<![.,!?;:])")
 HAS_LETTER_RE = re.compile(r"[A-Za-z]")
 
 EMOJI_RE = re.compile(
@@ -73,7 +73,7 @@ EMOJI_RE = re.compile(
 )
 
 # r/subreddit patterns
-SUBREDDIT_RE = re.compile(r"\br/[A-Za-z0-9_]+\b", flags=re.IGNORECASE)
+SUBREDDIT_RE = re.compile(r"r/[A-Za-z0-9_]+", flags=re.IGNORECASE)
 
 # define relevant sets of tags and words
 FINITE_VERB_TAGS = {"VB", "VBD", "VBN", "VBP", "VBZ"}
