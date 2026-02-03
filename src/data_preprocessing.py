@@ -73,7 +73,7 @@ EMOJI_RE = re.compile(
 )
 
 # r/subreddit patterns
-SUBREDDIT_RE = re.compile(r"r/[A-Za-z0-9_]+", flags=re.IGNORECASE)
+SUBREDDIT_RE = re.compile(r"/?r/[A-Za-z0-9_]+", flags=re.IGNORECASE)
 
 # define relevant sets of tags and words
 FINITE_VERB_TAGS = {"VB", "VBD", "VBN", "VBP", "VBZ"}
