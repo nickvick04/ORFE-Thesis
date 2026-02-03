@@ -57,7 +57,7 @@ BOT_TEXT_PATTERNS = [
 ]
 
 BOT_TEXT_RE = re.compile("|".join(BOT_TEXT_PATTERNS), flags=re.IGNORECASE)
-URL_RE = re.compile(r"(https?://[^\s\)\]\}]+|www\.[^\s\)\]\}]+)")
+URL_RE = re.compile(r"(https?://[^\s\)\]\}]+|www\.[^\s\)\]\}]+)(?=[\s\.\!\?,;:]|$)")
 HAS_LETTER_RE = re.compile(r"[A-Za-z]")
 
 EMOJI_RE = re.compile(
@@ -280,8 +280,8 @@ def clean_tokens_syntactic(text):
     # replace URLs with "URL" in sentences
     text = URL_RE.sub("URL", text)
 
-    # replace r/subreddit with "chat" in sentences
-    text = SUBREDDIT_RE.sub("the forum", text)
+    # replace r/subreddit with "this forum" in sentences
+    text = SUBREDDIT_RE.sub("this forum", text)
 
     # strip markdown emphasis
     text = strip_markdown_emphasis(text)
