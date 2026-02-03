@@ -72,6 +72,9 @@ EMOJI_RE = re.compile(
     flags=re.UNICODE,
 )
 
+# r/subreddit patterns
+SUBREDDIT_RE = re.compile(r"\br/[A-Za-z0-9_]+\b", flags=re.IGNORECASE)
+
 # define relevant sets of tags and words
 FINITE_VERB_TAGS = {"VB", "VBD", "VBN", "VBP", "VBZ"}
 SUBJECT_TAGS = {"NN", "NNS", "NNP", "NNPS", "PRP"}
@@ -276,6 +279,9 @@ def clean_tokens_syntactic(text):
 
     # replace URLs with "URL" in sentences
     text = URL_RE.sub("URL", text)
+
+    # replace r/subreddit with "chat" in sentences
+    text = SUBREDDIT_RE.sub("chat", text)
 
     # strip markdown emphasis
     text = strip_markdown_emphasis(text)
