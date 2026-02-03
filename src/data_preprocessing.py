@@ -281,7 +281,7 @@ def clean_tokens_syntactic(text):
     text = URL_RE.sub("URL", text)
 
     # replace r/subreddit with "chat" in sentences
-    text = SUBREDDIT_RE.sub("chat", text)
+    text = SUBREDDIT_RE.sub("the forum", text)
 
     # strip markdown emphasis
     text = strip_markdown_emphasis(text)
