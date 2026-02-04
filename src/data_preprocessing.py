@@ -288,6 +288,9 @@ def clean_tokens_syntactic(text):
 
     # remove emojis
     text = EMOJI_RE.sub("", text)
+
+    # replace newline characters 
+    text = re.sub(r'\n+', '. ', text)
     
     # sentence tokenize text
     sentences = split_sentences(text)
