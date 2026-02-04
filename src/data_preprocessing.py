@@ -294,6 +294,9 @@ def clean_tokens_syntactic(text):
 
     # remove emojis
     text = EMOJI_RE.sub("", text)
+
+    # handle numbered list items
+    text = re.sub(r'\.+\s*(\d+\))', r'. \1', text)
     
     # sentence tokenize text
     sentences = split_sentences(text)
