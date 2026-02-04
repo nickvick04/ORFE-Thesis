@@ -182,6 +182,9 @@ def strip_markdown_emphasis(text):
 
     # replace *word* or **word** with word
     text = re.sub(r"(\*{1,2}|_{1,2})(\S.*?\S)\1", r"\2", text)
+
+    # replace strikethrough markdown
+    text = re.sub(r'~~', '.', text)
     
     return text
 
@@ -277,6 +280,9 @@ def is_complete_sentence(sentence):
 
 def clean_tokens_syntactic(text):
 
+    # replace newline characters 
+    text = re.sub(r'\n+', '. ', text)
+
     # replace URLs with "URL" in sentences
     text = URL_RE.sub("URL", text)
 
@@ -288,9 +294,6 @@ def clean_tokens_syntactic(text):
 
     # remove emojis
     text = EMOJI_RE.sub("", text)
-
-    # replace newline characters 
-    text = re.sub(r'\n+', '. ', text)
     
     # sentence tokenize text
     sentences = split_sentences(text)
