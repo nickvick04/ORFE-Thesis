@@ -57,7 +57,21 @@ BOT_TEXT_PATTERNS = [
 ]
 
 BOT_TEXT_RE = re.compile("|".join(BOT_TEXT_PATTERNS), flags=re.IGNORECASE)
-URL_RE = re.compile(r"https?://[^\s\)\]\}]+(?<![.,!?;:])|www\.[^\s\)\]\}]+(?<![.,!?;:])")
+
+URL_RE = re.compile(
+    r"""
+    (?:
+        https?://
+        | www\.
+        | (?<!@)\b
+    )
+    (?:[a-zA-Z0-9-]+\.)+
+    [a-zA-Z]{2,}
+    (?:/[^\s\)\]\}.,!?;:]*)?
+    """,
+    re.VERBOSE
+)
+
 HAS_LETTER_RE = re.compile(r"[A-Za-z]")
 
 EMOJI_RE = re.compile(
