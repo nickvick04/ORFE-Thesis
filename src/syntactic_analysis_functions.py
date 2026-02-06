@@ -26,7 +26,7 @@ stanza.download("en")
 stanza_parser = stanza.Pipeline("en", processors="tokenize,pos,constituency")
 
 # import data processing functions
-from src.data_preprocessing import is_complete_sentence, clean_tokens_lexical, syntactic_preprocessing_df
+from data_preprocessing import is_complete_sentence, clean_tokens_lexical, syntactic_preprocessing_df
 
 # ----------------------------------------------------------------------------------------
 # Helper Functions

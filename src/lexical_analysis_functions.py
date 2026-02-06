@@ -15,7 +15,7 @@ from lexical_diversity import lex_div as ld
 from collections import Counter
 
 # import data processing functions
-from src.data_preprocessing import lexical_preprocessing_df
+from data_preprocessing import lexical_preprocessing_df
 
 # ----------------------------------------------------------------------------------------
 # Lexical Analysis Functions
