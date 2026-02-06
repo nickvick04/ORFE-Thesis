@@ -39,7 +39,7 @@ def corpus_to_df(corpus):
             data.append({
                 "utterance_id": utt.id,
                 "speaker_id": utt.speaker.id,
-                "text": utt.text,
+                "raw_text": utt.text,
                 "timestamp": t
             })
 
@@ -320,6 +320,12 @@ def clean_tokens_syntactic(text):
 
     return sentences
 
+def remove_fragments(sentences):
+    ''''''
+    complete_sentences = [s for s in sentences if is_complete_sentence(s)]
+
+    return complete_sentences
+
 # ----------------------------------------------------------------------------------------
 # Pre-Processing Functions
 # ----------------------------------------------------------------------------------------
@@ -329,13 +335,13 @@ def filter_df(df):
     utterances not containing letters.'''
 
     # remove deleted/removed utterances
-    df = df[~df["text"].str.lower().isin({"[deleted]", "[removed]"})]
+    df = df[~df["raw_text"].str.lower().isin({"[deleted]", "[removed]"})]
 
     # remove bot authored utterances
-    df = df[~df["text"].str.contains(BOT_TEXT_RE, regex=True)]
+    df = df[~df["raw_text"].str.contains(BOT_TEXT_RE, regex=True)]
 
     # remove utterances without a letter
-    df = df[df["text"].str.contains(HAS_LETTER_RE, regex=True)]
+    df = df[df["raw_text"].str.contains(HAS_LETTER_RE, regex=True)]
 
     return df
 
@@ -349,7 +355,7 @@ def lexical_preprocessing_df(df):
     df = filter_df(df)
 
     # final tokenized, lemmatized, and cleaned set
-    df["final"] = df["text"].apply(clean_tokens_lexical)
+    df["final_lexical_tokens"] = df["raw_text"].apply(clean_tokens_lexical)
 
     return df
 
@@ -362,6 +368,8 @@ def syntactic_preprocessing_df(df):
     df = filter_df(df)
 
     # final tokenized and cleaned set
-    df["final"] = df["text"].apply(clean_tokens_syntactic)
+    df["candidate_sentences"] = df["raw_text"].apply(clean_tokens_syntactic)
+
+    df["complete_sentences"] = df["candidate_sentences"].apply(remove_fragments)
 
     return df
