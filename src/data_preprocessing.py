@@ -51,8 +51,8 @@ def corpus_to_df(corpus):
 # ----------------------------------------------------------------------------------------
 BOT_TEXT_PATTERNS = [
     r"\bi am a bot\b",
-    r"\bthis (comment|post) was (posted|left by) a bot",
-    r"\bthis reply was generated automatically",
+    r"\bthis (?:comment|post) was (?:posted|left by) a bot\b",
+    r"\bthis reply was generated automatically\b",
     r"[\^*]*beep(?:\s+beep)?[\^*]*\s+[\^*]*boop(?:\s+boop)?[\^*]*"
 ]
 
@@ -363,6 +363,8 @@ def syntactic_preprocessing_df(df):
     '''Function that pre-processes the data in a given dataframe by removing
     deleted/removed utterances, bot utterances, and utterances not containing letters.
     Then, the remaining textual data is tokenized and cleaned for syntactic analysis.'''
+
+    print("Performing syntactic preprocessing")
 
     # filter utterances
     df = filter_df(df)
