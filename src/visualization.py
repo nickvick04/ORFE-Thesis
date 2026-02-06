@@ -22,7 +22,7 @@ def plot_lexical_metrics(df, rolling_window=None, resample_freq=None):
             label = f'{resample_freq}-resampled mean'
         elif rolling_window:
             series = df[col].rolling(window=rolling_window, min_periods=1).mean()
-            label = f'rolling mean (window={rolling_window})'
+            label = f'rolling window={rolling_window})'
         else:
             series = df[col]
             label = 'raw values'
@@ -51,7 +51,7 @@ def plot_syntactic_metrics(df, rolling_window=None, resample_freq=None):
     if resample_freq:
         method_desc = f'{resample_freq}-resampled mean'
     elif rolling_window:
-        method_desc = f'rolling mean (window={rolling_window})'
+        method_desc = f'rolling window={rolling_window})'
     else:
         method_desc = 'raw values'
     
