@@ -49,15 +49,16 @@ def corpus_to_df(corpus):
 # ----------------------------------------------------------------------------------------
 # Global Variables for DF-Level Cleaning
 # ----------------------------------------------------------------------------------------
+# various bot text flags
 BOT_TEXT_PATTERNS = [
     r"\bi am a bot\b",
     r"\bthis (?:comment|post) was (?:posted|left by) a bot\b",
     r"\bthis reply was generated automatically\b",
     r"[\^*]*beep(?:\s+beep)?[\^*]*\s+[\^*]*boop(?:\s+boop)?[\^*]*"
 ]
-
 BOT_TEXT_RE = re.compile("|".join(BOT_TEXT_PATTERNS), flags=re.IGNORECASE)
 
+# various https, www, and raw domain URL patterns
 URL_RE = re.compile(
     r"""
     (?:
@@ -74,11 +75,12 @@ URL_RE = re.compile(
 
 HAS_LETTER_RE = re.compile(r"[A-Za-z]")
 
+# emoji unicode patterns
 EMOJI_RE = re.compile(
     "["
     "\U0001F600-\U0001F64F"  # emoticons
-    "\U0001F300-\U0001F5FF"  # symbols & pictographs
-    "\U0001F680-\U0001F6FF"  # transport & map symbols
+    "\U0001F300-\U0001F5FF"  # symbols and pictographs
+    "\U0001F680-\U0001F6FF"  # transport and map symbols
     "\U0001F1E0-\U0001F1FF"  # flags (iOS)
     "\U00002702-\U000027B0"  # dingbats
     "\U000024C2-\U0001F251" 
