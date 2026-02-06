@@ -35,7 +35,7 @@ def yules_K(clean_tokens):
 
     N = len (clean_tokens)
     if N == 0:
-        return 0.0
+        return np.nan
     
     # count how many times each word occurs
     freq_counts = Counter(clean_tokens)
