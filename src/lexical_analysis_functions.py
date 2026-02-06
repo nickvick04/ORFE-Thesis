@@ -133,3 +133,5 @@ def compute_lexical_vals(df):
 
     print("Computing NAWL ratio values...")
     df["nawl_ratio"] = df["final_lexical_tokens"].apply(nawl_ratio)
+
+    return df
