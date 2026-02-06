@@ -364,7 +364,7 @@ def syntactic_preprocessing_df(df):
     deleted/removed utterances, bot utterances, and utterances not containing letters.
     Then, the remaining textual data is tokenized and cleaned for syntactic analysis.'''
 
-    print("Performing syntactic preprocessing")
+    print("Performing syntactic preprocessing...")
 
     # filter utterances
     df = filter_df(df)
