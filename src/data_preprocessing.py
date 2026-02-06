@@ -350,6 +350,8 @@ def lexical_preprocessing_df(df):
     deleted/removed utterances, bot utterances, and utterances not containing letters.
     Then, the remaining textual data is tokenized, lemmatized, and cleaned for lexical 
     analysis.'''
+
+    print("Performing lexical preprocessing...\n")
     
     # filter utterances
     df = filter_df(df)
@@ -364,7 +366,7 @@ def syntactic_preprocessing_df(df):
     deleted/removed utterances, bot utterances, and utterances not containing letters.
     Then, the remaining textual data is tokenized and cleaned for syntactic analysis.'''
 
-    print("Performing syntactic preprocessing...")
+    print("Performing syntactic preprocessing...\n")
 
     # filter utterances
     df = filter_df(df)

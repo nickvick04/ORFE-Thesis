@@ -15,7 +15,7 @@ from lexical_diversity import lex_div as ld
 from collections import Counter
 
 # import data processing functions
-from src.data_preprocessing import corpus_to_df, preprocess_df
+from src.data_preprocessing import lexical_preprocessing_df
 
 # ----------------------------------------------------------------------------------------
 # Lexical Analysis Functions
@@ -116,6 +116,8 @@ def nawl_ratio(clean_tokens, nawl_list=nawl_list):
 # compute the relevant metrics for each utterance
 def compute_lexical_vals(df):
     '''Function that applies all of the relevant lexical analysis functions to the cleaned tokens.'''
+
+    df = lexical_preprocessing_df(df)
 
     print("Computing MTLD values...")
     df["mtld_score"] = df["final"].apply(mtld_score)
