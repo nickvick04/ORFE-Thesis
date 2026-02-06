@@ -120,16 +120,16 @@ def compute_lexical_vals(df):
     df = lexical_preprocessing_df(df)
 
     print("Computing MTLD values...")
-    df["mtld_score"] = df["final"].apply(mtld_score)
+    df["mtld_score"] = df["final_lexical_tokens"].apply(mtld_score)
 
     print("Computing Yules K values...")
-    df["yules_k"] = df["final"].apply(yules_K)
+    df["yules_k"] = df["final_lexical_tokens"].apply(yules_K)
 
     print("Computing Zipf score values values...")
-    df["zipf_score"] = df["final"].apply(zipf_score)
+    df["zipf_score"] = df["final_lexical_tokens"].apply(zipf_score)
 
     print("Computing AOA score values...")
-    df["aoa_score"] = df["final"].apply(aoa_score)
+    df["aoa_score"] = df["final_lexical_tokens"].apply(aoa_score)
 
     print("Computing NAWL ratio values...")
-    df["nawl_ratio"] = df["final"].apply(nawl_ratio)
+    df["nawl_ratio"] = df["final_lexical_tokens"].apply(nawl_ratio)
