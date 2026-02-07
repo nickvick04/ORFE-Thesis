@@ -332,9 +332,12 @@ def remove_fragments(sentences):
 # Pre-Processing Functions
 # ----------------------------------------------------------------------------------------
 def filter_df(df):
-    '''Helper function that pre-processes a dataframe containing textual social 
+    '''Function that pre-processes a dataframe containing textual social 
     media data by removing deleted/removed utterances, bot utterances, and 
-    utterances not containing letters.'''
+    utterances not containing letters. Retains only the longest post per unique
+    user while recording the number of utterances they authored in a new column.'''
+
+    print("Removing spam utterances...")
 
     # remove deleted/removed utterances
     df = df[~df["raw_text"].str.lower().isin({"[deleted]", "[removed]"})]
@@ -345,6 +348,20 @@ def filter_df(df):
     # remove utterances without a letter
     df = df[df["raw_text"].str.contains(HAS_LETTER_RE, regex=True)]
 
+    print("Selecting longest utterances...")
+
+    # compute number of posts per speaker
+    df["num_utterances_by_speaker"] = df.groupby("speaker_id")["raw_text"].transform("count")
+
+    # compute post length (character count)
+    df["post_length"] = df["raw_text"].str.len()
+
+    # retain only the longest post per speaker
+    df = df.loc[df.groupby("speaker_id")["post_length"].idxmax()]
+
+    # drop helper column
+    df = df.drop(columns=["post_length"])
+
     return df
 
 def lexical_preprocessing_df(df):
@@ -354,9 +371,6 @@ def lexical_preprocessing_df(df):
     analysis.'''
 
     print("Performing lexical preprocessing...\n")
-    
-    # filter utterances
-    df = filter_df(df)
 
     # final tokenized, lemmatized, and cleaned set
     df["final_lexical_tokens"] = df["raw_text"].apply(clean_tokens_lexical)
@@ -369,9 +383,6 @@ def syntactic_preprocessing_df(df):
     Then, the remaining textual data is tokenized and cleaned for syntactic analysis.'''
 
     print("Performing syntactic preprocessing...\n")
-
-    # filter utterances
-    df = filter_df(df)
 
     # final tokenized and cleaned set
     df["candidate_sentences"] = df["raw_text"].apply(clean_tokens_syntactic)
