@@ -1,15 +1,18 @@
+# ----------------------------------------------------------------------------------------
+# This code is designed to process and analyze all the Convokit data
+# Code Author: Nicholas Vickery, Princeton ORFE '26
+# ----------------------------------------------------------------------------------------
+# imports
 import os
-
 from data_preprocessing import corpus_to_df, filter_df
 from lexical_analysis_functions import compute_lexical_vals
 from syntactic_analysis_functions import compute_syntactic_vals
 from visualization import *
 from convokit import Corpus
 
-
-
-def run_full_pipeline(corpus_dir: str):
-    
+def run_full_pipeline_cnvkt(corpus_dir: str):
+    '''Runs full preprocessing and analysis pipeline on a single Convokit
+    corpus and writes a CSV to the corpus' parent Variation folder'''
     corpus_name = os.path.basename(corpus_dir)
     print(f"Processing corpus: {corpus_name}")
 
@@ -34,7 +37,8 @@ def run_full_pipeline(corpus_dir: str):
     print(f"Saved -> {output_path}\n")
 
 
-def run_all_corpora(convokit_root: str):
+def run_all_corpora__cnvkt(convokit_root: str):
+    '''Runs pipeline for all corpora under Convokit root directory.'''
 
     for variation in os.listdir(convokit_root):
         variation_path = os.path.join(convokit_root, variation)
@@ -50,5 +54,4 @@ def run_all_corpora(convokit_root: str):
             if not os.path.isdir(corpus_dir):
                 continue
 
-            run_full_pipeline(corpus_dir)
-
+            run_full_pipeline_cnvkt(corpus_dir)
