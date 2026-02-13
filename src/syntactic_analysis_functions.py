@@ -16,7 +16,13 @@ from nltk.tree import ParentedTree
 import spacy
 nlp = spacy.load("en_core_web_sm")
 import stanza
-stanza_parser = stanza.Pipeline("en", processors="tokenize,pos,constituency")
+
+stanza_parser = stanza.Pipeline(
+    "en",
+    processors="tokenize,pos,constituency",
+    use_gpu=False,
+    download_method=None
+)
 
 # import data processing functions
 from data_preprocessing import is_complete_sentence, clean_tokens_lexical, syntactic_preprocessing_df
