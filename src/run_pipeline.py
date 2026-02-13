@@ -37,7 +37,7 @@ def run_full_pipeline_cnvkt(corpus_dir: str):
     print(f"Saved -> {output_path}\n")
 
 
-def run_all_corpora__cnvkt(convokit_root: str):
+def run_all_corpora_cnvkt(convokit_root: str):
     '''Runs pipeline for all corpora under Convokit root directory.'''
 
     for variation in os.listdir(convokit_root):
