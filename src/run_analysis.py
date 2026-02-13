@@ -8,6 +8,10 @@ import os
 import sys
 import argparse
 from run_pipeline import run_full_pipeline_cnvkt
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_CONVOKIT_ROOT = SCRIPT_DIR.parent.parent / "Thesis-Data" / "Convokit"
 
 def main():
     parser = argparse.ArgumentParser(
@@ -30,7 +34,7 @@ def main():
     parser.add_argument(
         "--convokit_root",
         type=str,
-        default="../../Thesis-Data/Convokit",
+        default=str(DEFAULT_CONVOKIT_ROOT),
         help="Path to Convokit root directory"
     )
 
