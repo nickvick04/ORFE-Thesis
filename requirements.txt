@@ -9,3 +9,4 @@ wordfreq
 lexical-diversity
 nltk
 stanza
+convokit
