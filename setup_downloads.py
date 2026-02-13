@@ -6,10 +6,28 @@
 # necessary package imports
 import subprocess
 import sys
+import nltk
+import stanza
 
 def install_models():
-    '''Function to download all required models for data analysis.'''
-    subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+    '''Download all required NLP models BEFORE running SLURM jobs.'''
+
+    print("Downloading spaCy model...")
+    subprocess.check_call(
+        [sys.executable, "-m", "spacy", "download", "en_core_web_sm"]
+    )
+
+    print("Downloading NLTK resources...")
+    nltk.download("punkt")
+    nltk.download("wordnet")
+    nltk.download("omw-1.4")
+    nltk.download("averaged_perceptron_tagger")
+    nltk.download("treebank")
+
+    print("Downloading Stanza English model...")
+    stanza.download("en")
+
+    print("All models downloaded successfully.")
 
 if __name__ == "__main__":
     install_models()
