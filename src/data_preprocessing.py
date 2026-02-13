@@ -5,19 +5,12 @@
 # general imports
 import pandas as pd
 from datetime import datetime
-from convokit import Corpus, download
 from tqdm import tqdm
 import nltk
 import re
 
 # set up nltk tokenizers
 from nltk.tokenize import word_tokenize, sent_tokenize, TweetTokenizer
-nltk.download('punkt_tab')
-
-# set up nltk lemmatizer
-nltk.download('wordnet')
-nltk.download('omw-1.4')
-nltk.download('averaged_perceptron_tagger')
 from nltk.stem import WordNetLemmatizer
 lemmatizer = WordNetLemmatizer()
 from nltk import pos_tag

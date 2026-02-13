@@ -5,8 +5,6 @@
 # general imports 
 import numpy as np
 import pandas as pd
-from convokit import Corpus, download
-import matplotlib.pyplot as plt
 
 # imports specific to lexical measures
 import re

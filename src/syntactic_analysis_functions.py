@@ -4,25 +4,18 @@
 # ----------------------------------------------------------------------------------------
 # general imports
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from convokit import Corpus, download
 from tqdm import tqdm
 import nltk
-import re
 
 # syntactic specific imports
 from nltk import pos_tag
 from nltk.corpus import treebank
 from nltk.tree import ParentedTree
-nltk.download('averaged_perceptron_tagger_eng', quiet=True)
-nltk.download('treebank')
 
 # import spacy nlp model
 import spacy
 nlp = spacy.load("en_core_web_sm")
 import stanza
-stanza.download("en")
 stanza_parser = stanza.Pipeline("en", processors="tokenize,pos,constituency")
 
 # import data processing functions
