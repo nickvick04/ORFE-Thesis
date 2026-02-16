@@ -7,7 +7,7 @@
 import os
 import sys
 import argparse
-from run_pipeline import run_full_pipeline_cnvkt
+from run_pipeline import run_full_pipeline_cnvkt_batches
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -51,7 +51,7 @@ def main():
         print(f"ERROR: Corpus directory not found:\n{corpus_dir}")
         sys.exit(1)
 
-    run_full_pipeline_cnvkt(corpus_dir)
+    run_full_pipeline_cnvkt_batches(corpus_dir)
 
 if __name__ == "__main__":
     main()
