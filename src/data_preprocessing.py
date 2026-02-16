@@ -41,7 +41,7 @@ def corpus_to_df(corpus):
     df = pd.DataFrame(data)
     return df
 
-def corpus_to_df_batches(corpus, batchsize=BATCH_SIZE):
+def corpus_to_df_batches(corpus, batch_size=BATCH_SIZE):
     '''Function to convert the convokit  corpus to a pandas dataframe structure in chunks
     so as to reduce memory capacity demanded of the cluster.'''
 
@@ -59,7 +59,7 @@ def corpus_to_df_batches(corpus, batchsize=BATCH_SIZE):
                 "timestamp": t
             })
 
-            if len(rows) >= batchsize:
+            if len(rows) >= batch_size:
                 yield pd.DataFrame(rows)
                 rows = []
 
