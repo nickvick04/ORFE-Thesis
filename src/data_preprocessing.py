@@ -19,6 +19,8 @@ from nltk.corpus import wordnet
 # ----------------------------------------------------------------------------------------
 # Format Data
 # ----------------------------------------------------------------------------------------
+BATCH_SIZE = 5000
+
 def corpus_to_df(corpus):
     '''Function to convert the convokit corpus to a pandas dataframe structure.'''
 
@@ -38,6 +40,31 @@ def corpus_to_df(corpus):
 
     df = pd.DataFrame(data)
     return df
+
+def corpus_to_df_batches(corpus, batchsize=BATCH_SIZE):
+    '''Function to convert the convokit  corpus to a pandas dataframe structure in chunks
+    so as to reduce memory capacity demanded of the cluster.'''
+
+    rows = []
+    for utt in corpus.iter_utterances():
+        # only consider utterances with timestamps and text
+        if hasattr(utt, "timestamp") and utt.text:
+            # convert timestamp from seconds since 1/1/1970 to datetime
+            t = datetime.fromtimestamp(int(utt.timestamp))
+
+            rows.append({
+                "utterance_id": utt.id,
+                "speaker_id": utt.speaker.id,
+                "raw_text": utt.text,
+                "timestamp": t
+            })
+
+            if len(rows) >= batchsize:
+                yield pd.DataFrame(rows)
+                rows = []
+
+    if rows:
+        yield pd.DataFrame(rows)
 
 # ----------------------------------------------------------------------------------------
 # Global Variables for DF-Level Cleaning
