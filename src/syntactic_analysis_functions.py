@@ -300,29 +300,16 @@ def compute_syntactic_vals(df):
         else:
             fragment_ratio_list.append(fragment_ratio(candidate, complete))
 
-    # compute average t_units per sentence
+    # compute average t_units per sentence, clause to t-unit ratio, and mltu values
     for sentences in tqdm(df["complete_sentences"], 
-                          total=num_utterances, desc="Computing average t-units per sentence"):
+                          total=num_utterances, desc="Computing remaining values per sentence"):
         if not sentences:
             avg_t_units_list.append(np.nan)
-        else:
-            avg_t_units_list.append(avg_t_units_per_sentence(sentences))
-
-
-    # compute clause to t-unit ratio
-    for sentences in tqdm(df["complete_sentences"], 
-                          total=num_utterances, desc="Computing clause to t-unit ratios"):
-        if not sentences:
             clause_t_unit_ratio_list.append(np.nan)
-        else:
-            clause_t_unit_ratio_list.append(clause_t_unit_ratio(sentences))
-
-    # compute mltu values
-    for sentences in tqdm(df["complete_sentences"], 
-                          total=num_utterances, desc="Computing MLTU values"):
-        if not sentences:
             mltu_list.append(np.nan)
         else:
+            avg_t_units_list.append(avg_t_units_per_sentence(sentences))
+            clause_t_unit_ratio_list.append(clause_t_unit_ratio(sentences))
             mltu_list.append(mltu(sentences))
         
     # store all values in dataframe
