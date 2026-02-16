@@ -40,7 +40,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Construct full path
+    # construct full path
     corpus_dir = os.path.join(
         args.convokit_root,
         args.variation,
