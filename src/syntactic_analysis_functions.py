@@ -12,9 +12,6 @@ from nltk import pos_tag
 from nltk.corpus import treebank
 from nltk.tree import ParentedTree
 
-# import spacy nlp model
-import spacy
-nlp = spacy.load("en_core_web_sm")
 import stanza
 
 stanza_parser = stanza.Pipeline(
