@@ -296,37 +296,44 @@ def mltu(complete_sentences):
 def compute_syntactic_vals(df):
     '''Function to compute the syntactic metrics for each utterance in a dataframe.'''
 
-    # convert the text into a list of candidate sentences
-    df = syntactic_preprocessing_df(df)
+    # compute values row-wise to avoid storing large nested sentence lists on the dataframe
     num_utterances = len(df)
-
-    # initialize lists to store results
     fragment_ratio_list = []
     avg_t_units_list = []
     clause_t_unit_ratio_list = []
     mltu_list = []
 
-    # compute fragment ratio
-    for candidate, complete in tqdm(zip(df["candidate_sentences"], df["complete_sentences"]), 
-                                    total=num_utterances, desc="Computing fragment ratios"):
-        if not candidate:
+    for text in tqdm(df["raw_text"], total=num_utterances, desc="Computing syntactic values"):
+        candidate_sentences = clean_tokens_syntactic(text)
+        complete_sentences = remove_fragments(candidate_sentences)
+
+        if not candidate_sentences:
             fragment_ratio_list.append(np.nan)
         else:
-            fragment_ratio_list.append(fragment_ratio(candidate, complete))
+            fragment_ratio_list.append(fragment_ratio(candidate_sentences, complete_sentences))
 
-    # compute average t_units per sentence, clause to t-unit ratio, and mltu values
-    for sentences in tqdm(df["complete_sentences"], 
-                          total=num_utterances, desc="Computing remaining values per sentence"):
-        if not sentences:
+        if not complete_sentences:
             avg_t_units_list.append(np.nan)
             clause_t_unit_ratio_list.append(np.nan)
             mltu_list.append(np.nan)
-        else:
-            avg_t_units_list.append(avg_t_units_per_sentence(sentences))
-            clause_t_unit_ratio_list.append(clause_t_unit_ratio(sentences))
-            mltu_list.append(mltu(sentences))
-        
-    # store all values in dataframe
+            continue
+
+        total_t_units = 0
+        total_clauses = 0
+        t_unit_lengths = []
+
+        for sent in complete_sentences:
+            t_count, clause_count, t_units = compute_sentence_stats(sent)
+            total_t_units += t_count
+            total_clauses += clause_count
+
+            for unit in t_units:
+                t_unit_lengths.append(t_unit_length(unit))
+
+        avg_t_units_list.append(total_t_units / len(complete_sentences))
+        clause_t_unit_ratio_list.append(total_clauses / total_t_units if total_t_units else np.nan)
+        mltu_list.append(np.mean(t_unit_lengths) if t_unit_lengths else np.nan)
+
     df["fragment_ratio"] = fragment_ratio_list
     df["avg_t_units"] = avg_t_units_list
     df["clause_to_t_unit_ratio"] = clause_t_unit_ratio_list
