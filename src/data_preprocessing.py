@@ -388,6 +388,8 @@ def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE):
     '''Stream corpus once, keep only the longest valid post per speaker globally,
     then yield those rows in batches.'''
 
+    print("Extracting the longest valid post per speaker")
+
     best_by_speaker = {}
     counts_by_speaker = {}
 
