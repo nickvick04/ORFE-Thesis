@@ -38,6 +38,13 @@ def main():
         help="Path to Convokit root directory"
     )
 
+    parser.add_argument(
+            "--batch_size",
+            type=int,
+            default=1000,
+            help="Rows per batch for pipeline processing (lower = less memory, slower)"
+        )
+
     args = parser.parse_args()
 
     # construct full path
@@ -51,7 +58,7 @@ def main():
         print(f"ERROR: Corpus directory not found:\n{corpus_dir}")
         sys.exit(1)
 
-    run_full_pipeline_cnvkt_batches(corpus_dir)
+    run_full_pipeline_cnvkt_batches(corpus_dir, batch_size=args.batch_size)
 
 if __name__ == "__main__":
     main()
