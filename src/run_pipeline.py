@@ -5,7 +5,7 @@
 # imports
 import os
 import gc
-from data_preprocessing import corpus_to_df, corpus_to_df_batches, filter_df
+from data_preprocessing import corpus_to_df, corpus_longest_posts_batches, filter_df
 from lexical_analysis_functions import compute_lexical_vals
 from syntactic_analysis_functions import compute_syntactic_vals
 from visualization import *
@@ -64,7 +64,7 @@ def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
     print(f"Currently processing batch: {i}")
 
     # iterate through batches, writing out results incrementally
-    for df_batch in corpus_to_df_batches(corpus, batch_size=batch_size):
+    for df_batch in corpus_longest_posts_batches(corpus, batch_size=batch_size):
         
         df_batch = filter_df(df_batch)
 
