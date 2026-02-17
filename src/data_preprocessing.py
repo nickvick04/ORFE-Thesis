@@ -5,9 +5,8 @@
 # general imports
 import pandas as pd
 from datetime import datetime
-from tqdm import tqdm
-import nltk
 import re
+import hashlib
 
 # set up nltk tokenizers
 from nltk.tokenize import word_tokenize, sent_tokenize, TweetTokenizer
