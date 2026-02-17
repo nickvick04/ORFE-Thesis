@@ -384,6 +384,60 @@ def filter_df(df):
 
     return df
 
+def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE):
+    '''Stream corpus once, keep only the longest valid post per speaker globally,
+    then yield those rows in batches.'''
+
+    best_by_speaker = {}
+    counts_by_speaker = {}
+
+    for utt in corpus.iter_utterances():
+        # only consider utterances with timestamps and text
+        if not hasattr(utt, "timestamp") or not utt.text:
+            continue
+
+        raw_text = utt.text
+        lower_text = raw_text.lower()
+
+        # mirror filter_df cleaning criteria during the global pass
+        if lower_text in {"[deleted]", "[removed]"}:
+            continue
+        if BOT_TEXT_RE.search(raw_text):
+            continue
+        if not HAS_LETTER_RE.search(raw_text):
+            continue
+
+        speaker_id = utt.speaker.id
+        counts_by_speaker[speaker_id] = counts_by_speaker.get(speaker_id, 0) + 1
+
+        post_length = len(raw_text)
+        prev = best_by_speaker.get(speaker_id)
+        # keep first max-length post encountered (matches idxmax tie behavior)
+        if prev is None or post_length > prev["post_length"]:
+            best_by_speaker[speaker_id] = {
+                "utterance_id": utt.id,
+                "speaker_id": speaker_id,
+                "raw_text": raw_text,
+                "timestamp": datetime.fromtimestamp(int(utt.timestamp)),
+                "post_length": post_length,
+            }
+
+    rows = []
+    for speaker_id, row in best_by_speaker.items():
+        rows.append({
+            "utterance_id": row["utterance_id"],
+            "speaker_id": speaker_id,
+            "raw_text": row["raw_text"],
+            "timestamp": row["timestamp"],
+            "num_utterances_by_speaker": counts_by_speaker[speaker_id],
+        })
+        if len(rows) >= batch_size:
+            yield pd.DataFrame(rows)
+            rows = []
+
+    if rows:
+        yield pd.DataFrame(rows)
+
 def lexical_preprocessing_df(df):
     '''Function that pre-processes the data in a given dataframe by removing
     deleted/removed utterances, bot utterances, and utterances not containing letters.
