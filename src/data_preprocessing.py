@@ -7,6 +7,8 @@ import pandas as pd
 from datetime import datetime
 import re
 import hashlib
+import json
+import os
 
 # set up nltk tokenizers
 from nltk.tokenize import word_tokenize, sent_tokenize, TweetTokenizer
@@ -70,6 +72,102 @@ def _speaker_shard_index(speaker_id, num_shards):
     digest = hashlib.md5(str(speaker_id).encode("utf-8")).hexdigest()
     return int(digest, 16) % num_shards
 
+def _extract_utterance_fields_json(obj):
+    '''Extract utterance fields from a Convokit JSONL row.'''
+
+    utt_id = obj.get("id", obj.get("utterance_id"))
+    raw_text = obj.get("text", obj.get("raw_text"))
+    timestamp = obj.get("timestamp")
+
+    speaker = obj.get("speaker", obj.get("speaker_id"))
+    if isinstance(speaker, dict):
+        speaker_id = speaker.get("id", speaker.get("speaker_id"))
+    else:
+        speaker_id = speaker
+
+    return utt_id, speaker_id, raw_text, timestamp
+
+def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
+    '''Stream utterances.jsonl directly, keep longest valid post per speaker globally,
+    then yield rows in batches.'''
+
+    utt_path = os.path.join(corpus_dir, "utterances.jsonl")
+    if not os.path.isfile(utt_path):
+        raise FileNotFoundError(f"Could not find utterances.jsonl at {utt_path}")
+
+    best_by_speaker = {}
+    counts_by_speaker = {}
+
+    # Pass 1: compute per-speaker count and longest utterance metadata.
+    with open(utt_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            utt_id, speaker_id, raw_text, timestamp = _extract_utterance_fields_json(obj)
+            if speaker_id is None or not raw_text or timestamp is None or utt_id is None:
+                continue
+
+            lower_text = raw_text.lower()
+            if lower_text in {"[deleted]", "[removed]"}:
+                continue
+            if BOT_TEXT_RE.search(raw_text):
+                continue
+            if not HAS_LETTER_RE.search(raw_text):
+                continue
+
+            counts_by_speaker[speaker_id] = counts_by_speaker.get(speaker_id, 0) + 1
+
+            post_length = len(raw_text)
+            prev = best_by_speaker.get(speaker_id)
+            if prev is None or post_length > prev["post_length"]:
+                try:
+                    dt = datetime.fromtimestamp(int(timestamp))
+                except (TypeError, ValueError, OSError):
+                    continue
+                best_by_speaker[speaker_id] = {
+                    "utterance_id": utt_id,
+                    "timestamp": dt,
+                    "post_length": post_length,
+                }
+
+    selected_utterance_to_speaker = {
+        row["utterance_id"]: speaker_id for speaker_id, row in best_by_speaker.items()
+    }
+
+    # Pass 2: emit only selected utterances in batches.
+    rows = []
+    with open(utt_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            utt_id, _, raw_text, _ = _extract_utterance_fields_json(obj)
+            speaker_id = selected_utterance_to_speaker.get(utt_id)
+            if speaker_id is None:
+                continue
+
+            rows.append({
+                "utterance_id": utt_id,
+                "speaker_id": speaker_id,
+                "raw_text": raw_text,
+                "timestamp": best_by_speaker[speaker_id]["timestamp"],
+                "num_utterances_by_speaker": counts_by_speaker[speaker_id],
+            })
+            if len(rows) >= batch_size:
+                yield pd.DataFrame(rows)
+                rows = []
+
+    if rows:
+        yield pd.DataFrame(rows)
 
 # ----------------------------------------------------------------------------------------
 # Global Variables for DF-Level Cleaning
