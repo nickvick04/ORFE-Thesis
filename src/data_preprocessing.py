@@ -398,10 +398,11 @@ def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE, num_shards=1, sh
     if shard_index < 0 or shard_index >= num_shards:
         raise ValueError("shard_index must satisfy 0 <= shard_index < num_shards")
 
+    print("Extracting longest post per user...")
+
+    # keep metadata only in pass 1 to avoid storing many full texts in memory.
     best_by_speaker = {}
     counts_by_speaker = {}
-
-    print("Extracting the longest valid post per speaker")
 
     for utt in corpus.iter_utterances():
         # only consider utterances with timestamps and text
@@ -430,18 +431,26 @@ def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE, num_shards=1, sh
         if prev is None or post_length > prev["post_length"]:
             best_by_speaker[speaker_id] = {
                 "utterance_id": utt.id,
-                "speaker_id": speaker_id,
-                "raw_text": raw_text,
                 "timestamp": datetime.fromtimestamp(int(utt.timestamp)),
                 "post_length": post_length,
             }
 
+    selected_utterance_to_speaker = {
+        row["utterance_id"]: speaker_id for speaker_id, row in best_by_speaker.items()
+    }
+
     rows = []
-    for speaker_id, row in best_by_speaker.items():
+    # pass 2: recover raw text only for selected utterances and emit in batches.
+    for utt in corpus.iter_utterances():
+        speaker_id = selected_utterance_to_speaker.get(utt.id)
+        if speaker_id is None:
+            continue
+
+        row = best_by_speaker[speaker_id]
         rows.append({
-            "utterance_id": row["utterance_id"],
+            "utterance_id": utt.id,
             "speaker_id": speaker_id,
-            "raw_text": row["raw_text"],
+            "raw_text": utt.text,
             "timestamp": row["timestamp"],
             "num_utterances_by_speaker": counts_by_speaker[speaker_id],
         })
