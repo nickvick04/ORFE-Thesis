@@ -46,20 +46,6 @@ def main():
         help="Rows per batch for lexical processing (lower = less memory, slower)",
     )
 
-    parser.add_argument(
-        "--num_shards",
-        type=int,
-        default=1,
-        help="Total number of shard jobs (for SLURM arrays)",
-    )
-
-    parser.add_argument(
-        "--shard_index",
-        type=int,
-        default=0,
-        help="Zero-based shard index for this job",
-    )
-
     args = parser.parse_args()
 
     corpus_dir = os.path.join(
@@ -75,8 +61,6 @@ def main():
     run_lexical_pipeline_cnvkt_batches(
         corpus_dir,
         batch_size=args.batch_size,
-        num_shards=args.num_shards,
-        shard_index=args.shard_index,
     )
 
 
