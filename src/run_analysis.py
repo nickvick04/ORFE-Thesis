@@ -44,6 +44,18 @@ def main():
             default=100,
             help="Rows per batch for pipeline processing (lower = less memory, slower)"
         )
+    parser.add_argument(
+        "--num_shards",
+        type=int,
+        default=1,
+        help="Total number of shard jobs (for SLURM arrays)"
+    )
+    parser.add_argument(
+        "--shard_index",
+        type=int,
+        default=0,
+        help="Zero-based shard index for this job"
+    )
 
     args = parser.parse_args()
 
@@ -58,7 +70,12 @@ def main():
         print(f"ERROR: Corpus directory not found:\n{corpus_dir}")
         sys.exit(1)
 
-    run_full_pipeline_cnvkt_batches(corpus_dir, batch_size=args.batch_size)
+    run_full_pipeline_cnvkt_batches(
+        corpus_dir,
+        batch_size=args.batch_size,
+        num_shards=args.num_shards,
+        shard_index=args.shard_index,
+    )
 
 if __name__ == "__main__":
     main()
