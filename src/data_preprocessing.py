@@ -65,6 +65,12 @@ def corpus_to_df_batches(corpus, batch_size=BATCH_SIZE):
     if rows:
         yield pd.DataFrame(rows)
 
+def _speaker_shard_index(speaker_id, num_shards):
+    '''Deterministically assign a speaker to a shard index in [0, num_shards).'''
+    digest = hashlib.md5(str(speaker_id).encode("utf-8")).hexdigest()
+    return int(digest, 16) % num_shards
+
+
 # ----------------------------------------------------------------------------------------
 # Global Variables for DF-Level Cleaning
 # ----------------------------------------------------------------------------------------
@@ -383,14 +389,19 @@ def filter_df(df):
 
     return df
 
-def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE):
+def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE, num_shards=1, shard_index=0):
     '''Stream corpus once, keep only the longest valid post per speaker globally,
     then yield those rows in batches.'''
 
-    print("Extracting the longest valid post per speaker")
+    if num_shards < 1:
+        raise ValueError("num_shards must be >= 1")
+    if shard_index < 0 or shard_index >= num_shards:
+        raise ValueError("shard_index must satisfy 0 <= shard_index < num_shards")
 
     best_by_speaker = {}
     counts_by_speaker = {}
+
+    print("Extracting the longest valid post per speaker")
 
     for utt in corpus.iter_utterances():
         # only consider utterances with timestamps and text
@@ -409,6 +420,8 @@ def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE):
             continue
 
         speaker_id = utt.speaker.id
+        if _speaker_shard_index(speaker_id, num_shards) != shard_index:
+            continue
         counts_by_speaker[speaker_id] = counts_by_speaker.get(speaker_id, 0) + 1
 
         post_length = len(raw_text)
