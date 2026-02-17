@@ -19,7 +19,7 @@ from nltk.corpus import wordnet
 # ----------------------------------------------------------------------------------------
 # Format Data
 # ----------------------------------------------------------------------------------------
-BATCH_SIZE = 5000
+BATCH_SIZE = 100
 
 def corpus_to_df(corpus):
     '''Function to convert the convokit corpus to a pandas dataframe structure.'''

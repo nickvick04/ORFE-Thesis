@@ -41,7 +41,7 @@ def main():
     parser.add_argument(
             "--batch_size",
             type=int,
-            default=1000,
+            default=100,
             help="Rows per batch for pipeline processing (lower = less memory, slower)"
         )
 
