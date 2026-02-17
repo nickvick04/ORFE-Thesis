@@ -118,10 +118,10 @@ def run_lexical_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
     first_batch = True
     i = 0
     print(f"Processing {corpus_name} lexical batches...")
-    print(f"Currently processing batch: {i}")
+    print(f"Currently processing lexical batch: {i}")
 
     for df_batch in corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=batch_size):
-        print(f"Analyzing lexical batch: {corpus_name}")
+        print(f"Currently processing lexical batch: {i}")
         df_batch = compute_lexical_vals(df_batch)
 
         df_batch.set_index('timestamp', inplace=True)
