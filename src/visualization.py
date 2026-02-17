@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import pandas as pd
 import seaborn as sns
 
@@ -31,8 +32,93 @@ def plot_lexical_trends_monthly(df, metrics=LEXICAL_METRICS):
         axes[i].set_ylabel(col)
         axes[i].grid(True, alpha=0.3)
 
+    axes[-1].xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+    axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+    plt.setp(axes[-1].get_xticklabels(), rotation=35, ha="right")
     axes[-1].set_xlabel("Month")
     fig.suptitle("Monthly Lexical Complexity Trends", fontsize=16)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    plt.show()
+
+def plot_lexical_trends_yearly(df, metrics=LEXICAL_METRICS):
+    '''Plot yearly mean trends for lexical metrics.'''
+    ts_df = _with_datetime_index(df)
+    yearly = ts_df[metrics].resample("Y").mean()
+
+    n = len(metrics)
+    fig, axes = plt.subplots(n, 1, figsize=(14, 3.5 * n), sharex=True)
+    if n == 1:
+        axes = [axes]
+
+    for i, col in enumerate(metrics):
+        axes[i].plot(yearly.index, yearly[col], color="tab:green", linewidth=2)
+        axes[i].set_ylabel(col)
+        axes[i].grid(True, alpha=0.3)
+
+    axes[-1].xaxis.set_major_locator(mdates.YearLocator())
+    axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    plt.setp(axes[-1].get_xticklabels(), rotation=35, ha="right")
+    axes[-1].set_xlabel("Year")
+    fig.suptitle("Yearly Lexical Complexity Trends", fontsize=16)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    plt.show()
+
+def _frequency_bucket(series):
+    '''Map num_utterances_by_speaker into fixed user-frequency buckets.'''
+    # Bucket boundaries are right-inclusive:
+    # 1-3 => (0,3], 4-6 => (3,6], 6-9 label corresponds to (6,9].
+    return pd.cut(
+        series,
+        bins=[0, 3, 6, 9, 20, float("inf")],
+        labels=["1-3", "4-6", "6-9", "10-20", "20+"],
+        include_lowest=True,
+        right=True,
+    )
+
+def plot_complexity_by_user_frequency_over_time(df, metrics=LEXICAL_METRICS, freq="M"):
+    '''Plot metric trends over time by fixed user-frequency buckets.'''
+    ts_df = _with_datetime_index(df)
+    if "num_utterances_by_speaker" not in ts_df.columns:
+        raise ValueError("Missing required column: num_utterances_by_speaker")
+
+    ts_df = ts_df.copy()
+    ts_df["num_utterances_by_speaker"] = pd.to_numeric(
+        ts_df["num_utterances_by_speaker"], errors="coerce"
+    )
+    ts_df = ts_df.dropna(subset=["num_utterances_by_speaker"])
+    ts_df = ts_df[ts_df["num_utterances_by_speaker"] > 0]
+    ts_df["frequency_bucket"] = _frequency_bucket(ts_df["num_utterances_by_speaker"])
+
+    grouped = (
+        ts_df
+        .groupby([pd.Grouper(freq=freq), "frequency_bucket"], observed=False)[metrics]
+        .mean()
+        .reset_index()
+    )
+
+    bucket_order = ["1-3", "4-6", "6-9", "10-20", "20+"]
+    n = len(metrics)
+    fig, axes = plt.subplots(n, 1, figsize=(14, 3.8 * n), sharex=True)
+    if n == 1:
+        axes = [axes]
+
+    for i, col in enumerate(metrics):
+        for b in bucket_order:
+            subset = grouped[grouped["frequency_bucket"].astype(str) == b]
+            axes[i].plot(subset["timestamp"], subset[col], linewidth=1.8, label=b)
+        axes[i].set_ylabel(col)
+        axes[i].grid(True, alpha=0.3)
+        axes[i].legend(title="Posts/User", ncol=3, fontsize=9)
+
+    if freq == "M":
+        axes[-1].xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+        axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+    elif freq == "Y":
+        axes[-1].xaxis.set_major_locator(mdates.YearLocator())
+        axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    plt.setp(axes[-1].get_xticklabels(), rotation=35, ha="right")
+    axes[-1].set_xlabel("Time")
+    fig.suptitle("Lexical Complexity Over Time by User Frequency Group", fontsize=16)
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.show()
 
