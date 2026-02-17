@@ -10,3 +10,4 @@ lexical-diversity
 nltk
 stanza
 convokit
+gc
