@@ -96,6 +96,37 @@ def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE, num_
         del df_batch
         gc.collect()
 
+def run_lexical_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
+    '''Runs lexical-only preprocessing and analysis on a single Convokit corpus in batches.'''
+
+    corpus_name = os.path.basename(corpus_dir)
+    print(f"Processing corpus (lexical only): {corpus_name}")
+
+    output_dir = os.path.dirname(corpus_dir)
+    output_name = f"{corpus_name}_lexical_df.csv"
+    output_path = os.path.join(output_dir, output_name)
+
+    print(f"Loading corpus: {corpus_name}")
+    corpus = Corpus(corpus_dir)
+
+    first_batch = True
+    i = 0
+    print(f"Processing {corpus_name} lexical batches...")
+    print(f"Currently processing batch: {i}")
+
+    for df_batch in corpus_longest_posts_batches(corpus, batch_size=batch_size):
+        print(f"Analyzing lexical batch: {corpus_name}")
+        df_batch = compute_lexical_vals(df_batch)
+
+        df_batch.set_index('timestamp', inplace=True)
+        df_batch.to_csv(output_path, mode="w" if first_batch else "a", header=first_batch)
+
+        first_batch = False
+        i += 1
+        del df_batch
+        gc.collect()
+
+
 def run_all_corpora_cnvkt(convokit_root: str):
     '''Runs pipeline for all corpora under Convokit root directory.'''
 
