@@ -79,7 +79,8 @@ def _extract_utterance_fields_json(obj):
     raw_text = obj.get("text", obj.get("raw_text"))
     timestamp = obj.get("timestamp")
 
-    speaker = obj.get("speaker", obj.get("speaker_id"))
+    # Convokit Reddit exports often use "user" instead of "speaker".
+    speaker = obj.get("speaker", obj.get("user", obj.get("speaker_id")))
     if isinstance(speaker, dict):
         speaker_id = speaker.get("id", speaker.get("speaker_id"))
     else:
@@ -138,9 +139,13 @@ def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
     selected_utterance_to_speaker = {
         row["utterance_id"]: speaker_id for speaker_id, row in best_by_speaker.items()
     }
+    print(
+        f"Selected {len(best_by_speaker)} speakers and {len(selected_utterance_to_speaker)} utterances from {utt_path}"
+    )
 
     # Pass 2: emit only selected utterances in batches.
     rows = []
+    emitted_rows = 0
     with open(utt_path, "r", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -162,12 +167,18 @@ def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
                 "timestamp": best_by_speaker[speaker_id]["timestamp"],
                 "num_utterances_by_speaker": counts_by_speaker[speaker_id],
             })
+            emitted_rows += 1
             if len(rows) >= batch_size:
                 yield pd.DataFrame(rows)
                 rows = []
 
     if rows:
         yield pd.DataFrame(rows)
+
+    if emitted_rows == 0:
+        raise RuntimeError(
+            f"No rows emitted from {utt_path}. Check JSON schema and filtering rules."
+        )
 
 # ----------------------------------------------------------------------------------------
 # Global Variables for DF-Level Cleaning
