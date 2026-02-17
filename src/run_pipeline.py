@@ -7,7 +7,6 @@ import os
 import gc
 from data_preprocessing import corpus_to_df, corpus_longest_posts_batches, filter_df
 from lexical_analysis_functions import compute_lexical_vals
-from syntactic_analysis_functions import compute_syntactic_vals
 from visualization import *
 from convokit import Corpus
 
@@ -30,6 +29,7 @@ def run_full_pipeline_cnvkt(corpus_dir: str):
     df = filter_df(df)
     print(f"Analyzing corpus: {corpus_name}")
     df = compute_lexical_vals(df)
+    from syntactic_analysis_functions import compute_syntactic_vals
     df = compute_syntactic_vals(df)
     df.set_index('timestamp', inplace=True)
 
@@ -74,6 +74,7 @@ def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE, num_
     print(f"Currently processing batch: {i}")
 
     # iterate through globally filtered longest-post rows in batches
+    from syntactic_analysis_functions import compute_syntactic_vals
     for df_batch in corpus_longest_posts_batches(
         corpus,
         batch_size=batch_size,
@@ -125,7 +126,6 @@ def run_lexical_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
         i += 1
         del df_batch
         gc.collect()
-
 
 def run_all_corpora_cnvkt(convokit_root: str):
     '''Runs pipeline for all corpora under Convokit root directory.'''
