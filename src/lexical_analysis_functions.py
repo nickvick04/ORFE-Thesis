@@ -112,7 +112,7 @@ def nawl_ratio(clean_tokens, nawl_list=nawl_list):
     return nawl_ratio
 
 # compute the relevant metrics for each utterance
-def compute_lexical_vals(df):
+def compute_lexical_vals(df, drop_token_column=True):
     '''Function that applies all of the relevant lexical analysis functions to the cleaned tokens.'''
 
     df = lexical_preprocessing_df(df)
@@ -131,5 +131,9 @@ def compute_lexical_vals(df):
 
     print("Computing NAWL ratio values...")
     df["nawl_ratio"] = df["final_lexical_tokens"].apply(nawl_ratio)
+
+    # drop large intermediate token lists once lexical metrics are computed
+    if drop_token_column and "final_lexical_tokens" in df.columns:
+        df = df.drop(columns=["final_lexical_tokens"])
 
     return df
