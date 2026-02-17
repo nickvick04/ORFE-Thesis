@@ -21,6 +21,10 @@ stanza_parser = stanza.Pipeline(
     download_method=None
 )
 
+# Guardrails to avoid parser memory blow-ups on pathological long sentences.
+MAX_PARSE_CHARS = 1200
+MAX_PARSE_TOKENS = 120
+
 # import data processing functions
 from data_preprocessing import is_complete_sentence, clean_tokens_lexical, clean_tokens_syntactic, remove_fragments
 
@@ -29,12 +33,23 @@ from data_preprocessing import is_complete_sentence, clean_tokens_lexical, clean
 # ----------------------------------------------------------------------------------------
 def create_parented_tree(complete_sent):
     '''Helper function to create a parented tree for a valid sentence'''
-    
-    doc = stanza_parser(complete_sent)
-    stanza_tree = doc.sentences[0].constituency
-    parented_tree = ParentedTree.fromstring(str(stanza_tree))
-    
-    return parented_tree
+
+    text = complete_sent.strip()
+    if not text:
+        return None
+
+    # Very long sentences can cause constituency parsing to consume extreme memory.
+    if len(text) > MAX_PARSE_CHARS or len(text.split()) > MAX_PARSE_TOKENS:
+        return None
+
+    try:
+        doc = stanza_parser(text)
+        if not doc.sentences:
+            return None
+        stanza_tree = doc.sentences[0].constituency
+        return ParentedTree.fromstring(str(stanza_tree))
+    except Exception:
+        return None
 
 def count_t_units(complete_sent, ptree=None):
     '''Helper function that returns the number of t-units in a sentence'''
@@ -49,6 +64,8 @@ def count_t_units(complete_sent, ptree=None):
     # create a dependency tree
     if ptree is None:
         ptree = create_parented_tree(complete_sent)
+    if ptree is None:
+        return 1
 
     # iterated through parented subtrees
     for subtree in ptree.subtrees():
@@ -116,6 +133,8 @@ def extract_t_units(complete_sent, ptree=None):
     # create a dependency tree
     if ptree is None:
         ptree = create_parented_tree(complete_sent)
+    if ptree is None:
+        return [complete_sent]
     
     # flag if the sentence is a question
     for subtree in ptree.subtrees():
@@ -204,6 +223,8 @@ def count_clauses(complete_sent, ptree=None, t_unit_count=None):
     # create a dependency tree
     if ptree is None:
         ptree = create_parented_tree(complete_sent)
+    if ptree is None:
+        return t_unit_count
     # print(TreePrettyPrinter(ptree))
 
     # iterated through parented subtrees
