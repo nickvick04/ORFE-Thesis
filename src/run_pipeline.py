@@ -65,8 +65,6 @@ def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
 
     # iterate through batches, writing out results incrementally
     for df_batch in corpus_longest_posts_batches(corpus, batch_size=batch_size):
-        
-        df_batch = filter_df(df_batch)
 
         print(f"Analyzing corpus batch: {corpus_name}")
         df_batch = compute_lexical_vals(df_batch)
