@@ -4,13 +4,14 @@
 # ----------------------------------------------------------------------------------------
 # imports
 import os
+import gc
 from data_preprocessing import corpus_to_df, corpus_to_df_batches, filter_df
 from lexical_analysis_functions import compute_lexical_vals
 from syntactic_analysis_functions import compute_syntactic_vals
 from visualization import *
 from convokit import Corpus
 
-BATCH_SIZE = 5000
+BATCH_SIZE = 1000
 
 def run_full_pipeline_cnvkt(corpus_dir: str):
     '''Runs full preprocessing and analysis pipeline on a single Convokit
@@ -39,7 +40,7 @@ def run_full_pipeline_cnvkt(corpus_dir: str):
     df.to_csv(output_path)
     print(f"Saved -> {output_path}\n")
 
-def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=5000):
+def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
     '''Runs full preprocessing and analysis pipeline on a single Convokit
     corpus and writes a CSV to the corpus' parent Variation folder in batches
     so as to reduce the memory capacity demanded of the cluster.'''
@@ -63,7 +64,7 @@ def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=5000):
     print(f"Currently processing batch: {i}")
 
     # iterate through batches, writing out results incrementally
-    for df_batch in corpus_to_df_batches(corpus, batch_size=BATCH_SIZE):
+    for df_batch in corpus_to_df_batches(corpus, batch_size=batch_size):
         
         df_batch = filter_df(df_batch)
 
@@ -80,6 +81,7 @@ def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=5000):
         i += 1
         # delete explicitly to save storage
         del df_batch
+        gc.collect()
 
 def run_all_corpora_cnvkt(convokit_root: str):
     '''Runs pipeline for all corpora under Convokit root directory.'''
