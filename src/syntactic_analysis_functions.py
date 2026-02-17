@@ -25,7 +25,7 @@ stanza_parser = stanza.Pipeline(
 )
 
 # import data processing functions
-from data_preprocessing import is_complete_sentence, clean_tokens_lexical, syntactic_preprocessing_df
+from data_preprocessing import is_complete_sentence, clean_tokens_lexical, clean_tokens_syntactic, remove_fragments
 
 # ----------------------------------------------------------------------------------------
 # Helper Functions
@@ -39,7 +39,7 @@ def create_parented_tree(complete_sent):
     
     return parented_tree
 
-def count_t_units(complete_sent):
+def count_t_units(complete_sent, ptree=None):
     '''Helper function that returns the number of t-units in a sentence'''
 
     t_unit_count = 0
@@ -50,7 +50,8 @@ def count_t_units(complete_sent):
     to_decremented = False
     
     # create a dependency tree
-    ptree = create_parented_tree(complete_sent)
+    if ptree is None:
+        ptree = create_parented_tree(complete_sent)
 
     # iterated through parented subtrees
     for subtree in ptree.subtrees():
@@ -109,14 +110,15 @@ def count_t_units(complete_sent):
 
     return t_unit_count
 
-def extract_t_units(complete_sent):
+def extract_t_units(complete_sent, ptree=None):
     '''Helper function that returns a list of the t-units in a complete sentence.'''
     
     t_units = []
     is_question = False
     
     # create a dependency tree
-    ptree = create_parented_tree(complete_sent)
+    if ptree is None:
+        ptree = create_parented_tree(complete_sent)
     
     # flag if the sentence is a question
     for subtree in ptree.subtrees():
@@ -190,7 +192,7 @@ def extract_t_units(complete_sent):
     
     return filtered_t_units
 
-def count_clauses(complete_sent):
+def count_clauses(complete_sent, ptree=None, t_unit_count=None):
     '''Helper function to count the number of clauses in a complete sentence.'''
 
     clause_count = 0
@@ -199,10 +201,12 @@ def count_clauses(complete_sent):
     if not is_complete_sentence(complete_sent):
         return 0
     
-    t_unit_count = count_t_units(complete_sent)
+    if t_unit_count is None:
+        t_unit_count = count_t_units(complete_sent, ptree=ptree)
 
     # create a dependency tree
-    ptree = create_parented_tree(complete_sent)
+    if ptree is None:
+        ptree = create_parented_tree(complete_sent)
     # print(TreePrettyPrinter(ptree))
 
     # iterated through parented subtrees
@@ -220,6 +224,16 @@ def t_unit_length(t_unit):
     tokens = clean_tokens_lexical(t_unit)
     
     return len(tokens)
+
+def compute_sentence_stats(complete_sent):
+    '''Parses a sentence once and returns the syntactic counts needed by all metrics.'''
+
+    ptree = create_parented_tree(complete_sent)
+    t_units = extract_t_units(complete_sent, ptree=ptree)
+    t_count = count_t_units(complete_sent, ptree=ptree)
+    clause_count = count_clauses(complete_sent, ptree=ptree, t_unit_count=t_count)
+
+    return t_count, clause_count, t_units
 
 # ----------------------------------------------------------------------------------------
 # Lexical Analysis Functions
