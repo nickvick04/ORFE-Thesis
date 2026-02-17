@@ -40,7 +40,7 @@ def run_full_pipeline_cnvkt(corpus_dir: str):
     df.to_csv(output_path)
     print(f"Saved -> {output_path}\n")
 
-def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
+def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE, num_shards=1, shard_index=0):
     '''Runs full preprocessing and analysis pipeline on a single Convokit
     corpus and writes a CSV to the corpus' parent Variation folder in batches
     so as to reduce the memory capacity demanded of the cluster.'''
@@ -49,9 +49,18 @@ def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
     corpus_name = os.path.basename(corpus_dir)
     print(f"Processing corpus: {corpus_name}")
 
+    if num_shards < 1:
+        raise ValueError("num_shards must be >= 1")
+    if shard_index < 0 or shard_index >= num_shards:
+        raise ValueError("shard_index must satisfy 0 <= shard_index < num_shards")
+
     # get path to csv next to corpus
     output_dir = os.path.dirname(corpus_dir)
-    output_path = os.path.join(output_dir, f"{corpus_name}_df.csv")
+    if num_shards == 1:
+        output_name = f"{corpus_name}_df.csv"
+    else:
+        output_name = f"{corpus_name}_df_shard-{shard_index:03d}-of-{num_shards:03d}.csv"
+    output_path = os.path.join(output_dir, output_name)
 
     # load corpus
     print(f"Loading corpus: {corpus_name}")
@@ -61,10 +70,16 @@ def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
     first_batch = True
     i = 0
     print(f"Processing {corpus_name} in batches...")
+    print(f"Shard {shard_index + 1}/{num_shards}")
     print(f"Currently processing batch: {i}")
 
-    # iterate through batches, writing out results incrementally
-    for df_batch in corpus_longest_posts_batches(corpus, batch_size=batch_size):
+    # iterate through globally filtered longest-post rows in batches
+    for df_batch in corpus_longest_posts_batches(
+        corpus,
+        batch_size=batch_size,
+        num_shards=num_shards,
+        shard_index=shard_index,
+    ):
 
         print(f"Analyzing corpus batch: {corpus_name}")
         df_batch = compute_lexical_vals(df_batch)
