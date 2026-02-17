@@ -5,10 +5,14 @@
 # imports
 import os
 import gc
-from data_preprocessing import corpus_to_df, corpus_longest_posts_batches, filter_df
+from data_preprocessing import (
+    corpus_to_df,
+    corpus_longest_posts_batches,
+    corpus_longest_posts_batches_from_jsonl,
+    filter_df,
+)
 from lexical_analysis_functions import compute_lexical_vals
 from visualization import *
-from convokit import Corpus
 
 BATCH_SIZE = 1000
 
@@ -21,6 +25,7 @@ def run_full_pipeline_cnvkt(corpus_dir: str):
 
     # load corpus
     print(f"Loading corpus: {corpus_name}")
+    from convokit import Corpus
     corpus = Corpus(corpus_dir)
 
     # pipeline
@@ -64,6 +69,7 @@ def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE, num_
 
     # load corpus
     print(f"Loading corpus: {corpus_name}")
+    from convokit import Corpus
     corpus = Corpus(corpus_dir)
 
     # boolean and index to track
@@ -107,15 +113,14 @@ def run_lexical_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
     output_name = f"{corpus_name}_lexical_df.csv"
     output_path = os.path.join(output_dir, output_name)
 
-    print(f"Loading corpus: {corpus_name}")
-    corpus = Corpus(corpus_dir)
+    print(f"Loading utterances.jsonl from disk: {corpus_name}")
 
     first_batch = True
     i = 0
     print(f"Processing {corpus_name} lexical batches...")
     print(f"Currently processing batch: {i}")
 
-    for df_batch in corpus_longest_posts_batches(corpus, batch_size=batch_size):
+    for df_batch in corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=batch_size):
         print(f"Analyzing lexical batch: {corpus_name}")
         df_batch = compute_lexical_vals(df_batch)
 
