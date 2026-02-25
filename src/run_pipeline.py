@@ -5,12 +5,7 @@
 # imports
 import os
 import gc
-from data_preprocessing import (
-    corpus_to_df,
-    corpus_longest_posts_batches,
-    corpus_longest_posts_batches_from_jsonl,
-    filter_df,
-)
+from data_preprocessing import corpus_longest_posts_batches, corpus_longest_posts_batches_from_jsonl
 from lexical_analysis_functions import compute_lexical_vals
 from visualization import *
 
@@ -102,4 +97,3 @@ def run_lexical_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
         i += 1
         del df_batch
         gc.collect()
-        
