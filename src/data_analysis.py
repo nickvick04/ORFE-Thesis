@@ -12,10 +12,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_CONVOKIT_ROOT = SCRIPT_DIR.parent.parent / "Thesis-Data" / "Convokit"
 
 
-def combine_pipeline_csvs_to_lexical_master(
-    convokit_root: str | Path = DEFAULT_CONVOKIT_ROOT,
-    output_filename: str = "lexical_master.csv",
-) -> Path:
+def combine_pipeline_csvs_to_lexical_master(convokit_root: str | Path = DEFAULT_CONVOKIT_ROOT,
+    output_filename: str = "lexical_master.csv",) -> Path:
     """Combine pipeline-produced CSV files under Convokit variations into one master CSV.
 
     Expected structure:
