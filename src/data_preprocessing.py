@@ -96,6 +96,22 @@ def _extract_parent_id_json(obj):
         return parent_id.get("id", parent_id.get("utterance_id", parent_id.get("parent_id")))
     return parent_id
 
+def _extract_score_json(obj):
+    '''Extract Reddit score from a Convokit JSONL row if present.'''
+
+    meta = obj.get("meta")
+    if isinstance(meta, dict) and meta.get("score") is not None:
+        return meta.get("score")
+    return obj.get("score")
+
+def _extract_score_utterance(utt):
+    '''Extract Reddit score from a Convokit utterance object if present.'''
+
+    meta = getattr(utt, "meta", None)
+    if isinstance(meta, dict) and meta.get("score") is not None:
+        return meta.get("score")
+    return getattr(utt, "score", None)
+
 def _compute_post_depth(utt_id, parent_by_utt, memo, visiting):
     '''Compute utterance nesting depth from parent links.
     Depth 0 indicates a top-level post; depth 1+ indicates nested replies.
@@ -135,6 +151,8 @@ def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
     best_by_speaker = {}
     counts_by_speaker = {}
     parent_by_utt = {}
+    score_by_utt = {}
+    direct_reply_counts = {}
 
     # Pass 1: compute per-speaker count and longest utterance metadata.
     with open(utt_path, "r", encoding="utf-8") as f:
@@ -148,7 +166,11 @@ def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
 
             utt_id, speaker_id, raw_text, timestamp = _extract_utterance_fields_json(obj)
             if utt_id is not None:
-                parent_by_utt[utt_id] = _extract_parent_id_json(obj)
+                score_by_utt[utt_id] = _extract_score_json(obj)
+                parent_id = _extract_parent_id_json(obj)
+                parent_by_utt[utt_id] = parent_id
+                if parent_id is not None:
+                    direct_reply_counts[parent_id] = direct_reply_counts.get(parent_id, 0) + 1
             if speaker_id is None or not raw_text or timestamp is None or utt_id is None:
                 continue
 
@@ -207,6 +229,8 @@ def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
                 "timestamp": best_by_speaker[speaker_id]["timestamp"],
                 "num_utterances_by_speaker": counts_by_speaker[speaker_id],
                 "post_depth": _compute_post_depth(utt_id, parent_by_utt, depth_cache, set()),
+                "score": score_by_utt.get(utt_id),
+                "num_direct_replies": direct_reply_counts.get(utt_id, 0),
             })
             emitted_rows += 1
             if len(rows) >= batch_size:
@@ -554,9 +578,15 @@ def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE, num_shards=1, sh
     best_by_speaker = {}
     counts_by_speaker = {}
     parent_by_utt = {}
+    score_by_utt = {}
+    direct_reply_counts = {}
 
     for utt in corpus.iter_utterances():
-        parent_by_utt[utt.id] = getattr(utt, "reply_to", None)
+        parent_id = getattr(utt, "reply_to", None)
+        parent_by_utt[utt.id] = parent_id
+        score_by_utt[utt.id] = _extract_score_utterance(utt)
+        if parent_id is not None:
+            direct_reply_counts[parent_id] = direct_reply_counts.get(parent_id, 0) + 1
 
         # only consider utterances with timestamps and text
         if not hasattr(utt, "timestamp") or not utt.text:
@@ -608,6 +638,8 @@ def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE, num_shards=1, sh
             "timestamp": row["timestamp"],
             "num_utterances_by_speaker": counts_by_speaker[speaker_id],
             "post_depth": _compute_post_depth(utt.id, parent_by_utt, depth_cache, set()),
+            "score": score_by_utt.get(utt.id),
+            "num_direct_replies": direct_reply_counts.get(utt.id, 0),
         })
         if len(rows) >= batch_size:
             yield pd.DataFrame(rows)
