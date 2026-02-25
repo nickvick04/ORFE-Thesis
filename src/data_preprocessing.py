@@ -88,6 +88,42 @@ def _extract_utterance_fields_json(obj):
 
     return utt_id, speaker_id, raw_text, timestamp
 
+def _extract_parent_id_json(obj):
+    '''Extract parent/reply id from a Convokit JSONL row if present.'''
+
+    parent_id = obj.get("reply_to", obj.get("parent_id", obj.get("parent")))
+    if isinstance(parent_id, dict):
+        return parent_id.get("id", parent_id.get("utterance_id", parent_id.get("parent_id")))
+    return parent_id
+
+def _compute_post_depth(utt_id, parent_by_utt, memo, visiting):
+    '''Compute utterance nesting depth from parent links.
+    Depth 0 indicates a top-level post; depth 1+ indicates nested replies.
+    '''
+
+    if utt_id in memo:
+        return memo[utt_id]
+
+    if utt_id in visiting:
+        # Defensive fallback for malformed cyclic parent chains.
+        memo[utt_id] = 0
+        return 0
+
+    visiting.add(utt_id)
+    parent_id = parent_by_utt.get(utt_id)
+
+    if parent_id is None:
+        depth = 0
+    elif parent_id not in parent_by_utt:
+        # Parent exists but is not present in corpus export.
+        depth = 1
+    else:
+        depth = _compute_post_depth(parent_id, parent_by_utt, memo, visiting) + 1
+
+    visiting.remove(utt_id)
+    memo[utt_id] = depth
+    return depth
+
 def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
     '''Stream utterances.jsonl directly, keep longest valid post per speaker globally,
     then yield rows in batches.'''
@@ -98,6 +134,7 @@ def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
 
     best_by_speaker = {}
     counts_by_speaker = {}
+    parent_by_utt = {}
 
     # Pass 1: compute per-speaker count and longest utterance metadata.
     with open(utt_path, "r", encoding="utf-8") as f:
@@ -110,6 +147,8 @@ def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
                 continue
 
             utt_id, speaker_id, raw_text, timestamp = _extract_utterance_fields_json(obj)
+            if utt_id is not None:
+                parent_by_utt[utt_id] = _extract_parent_id_json(obj)
             if speaker_id is None or not raw_text or timestamp is None or utt_id is None:
                 continue
 
@@ -139,6 +178,7 @@ def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
     selected_utterance_to_speaker = {
         row["utterance_id"]: speaker_id for speaker_id, row in best_by_speaker.items()
     }
+    depth_cache = {}
     print(
         f"Selected {len(best_by_speaker)} speakers and {len(selected_utterance_to_speaker)} utterances from {utt_path}"
     )
@@ -166,6 +206,7 @@ def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
                 "raw_text": raw_text,
                 "timestamp": best_by_speaker[speaker_id]["timestamp"],
                 "num_utterances_by_speaker": counts_by_speaker[speaker_id],
+                "post_depth": _compute_post_depth(utt_id, parent_by_utt, depth_cache, set()),
             })
             emitted_rows += 1
             if len(rows) >= batch_size:
@@ -512,8 +553,11 @@ def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE, num_shards=1, sh
     # keep metadata only in pass 1 to avoid storing many full texts in memory.
     best_by_speaker = {}
     counts_by_speaker = {}
+    parent_by_utt = {}
 
     for utt in corpus.iter_utterances():
+        parent_by_utt[utt.id] = getattr(utt, "reply_to", None)
+
         # only consider utterances with timestamps and text
         if not hasattr(utt, "timestamp") or not utt.text:
             continue
@@ -547,6 +591,7 @@ def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE, num_shards=1, sh
     selected_utterance_to_speaker = {
         row["utterance_id"]: speaker_id for speaker_id, row in best_by_speaker.items()
     }
+    depth_cache = {}
 
     rows = []
     # pass 2: recover raw text only for selected utterances and emit in batches.
@@ -562,6 +607,7 @@ def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE, num_shards=1, sh
             "raw_text": utt.text,
             "timestamp": row["timestamp"],
             "num_utterances_by_speaker": counts_by_speaker[speaker_id],
+            "post_depth": _compute_post_depth(utt.id, parent_by_utt, depth_cache, set()),
         })
         if len(rows) >= batch_size:
             yield pd.DataFrame(rows)
