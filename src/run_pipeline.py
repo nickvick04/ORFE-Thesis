@@ -16,35 +16,6 @@ from visualization import *
 
 BATCH_SIZE = 1000
 
-def run_full_pipeline_cnvkt(corpus_dir: str):
-    '''Runs full preprocessing and analysis pipeline on a single Convokit
-    corpus and writes a CSV to the corpus' parent Variation folder'''
-
-    corpus_name = os.path.basename(corpus_dir)
-    print(f"Processing corpus: {corpus_name}")
-
-    # load corpus
-    print(f"Loading corpus: {corpus_name}")
-    from convokit import Corpus
-    corpus = Corpus(corpus_dir)
-
-    # pipeline
-    print(f"Converting corpus: {corpus_name}")
-    df = corpus_to_df(corpus)
-    df = filter_df(df)
-    print(f"Analyzing corpus: {corpus_name}")
-    df = compute_lexical_vals(df)
-    from syntactic_analysis_functions import compute_syntactic_vals
-    df = compute_syntactic_vals(df)
-    df.set_index('timestamp', inplace=True)
-
-    # save csv next to corpus
-    output_dir = os.path.dirname(corpus_dir)
-    output_path = os.path.join(output_dir, f"{corpus_name}_df.csv")
-
-    df.to_csv(output_path)
-    print(f"Saved -> {output_path}\n")
-
 def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE, num_shards=1, shard_index=0):
     '''Runs full preprocessing and analysis pipeline on a single Convokit
     corpus and writes a CSV to the corpus' parent Variation folder in batches
@@ -131,22 +102,4 @@ def run_lexical_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
         i += 1
         del df_batch
         gc.collect()
-
-def run_all_corpora_cnvkt(convokit_root: str):
-    '''Runs pipeline for all corpora under Convokit root directory.'''
-
-    for variation in os.listdir(convokit_root):
-        variation_path = os.path.join(convokit_root, variation)
-
-        if not os.path.isdir(variation_path):
-            continue
-
-        print(f"\n=== {variation} ===")
-
-        for corpus_name in os.listdir(variation_path):
-            corpus_dir = os.path.join(variation_path, corpus_name)
-
-            if not os.path.isdir(corpus_dir):
-                continue
-
-            run_full_pipeline_cnvkt(corpus_dir)
+        
