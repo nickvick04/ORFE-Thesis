@@ -8,12 +8,8 @@ from typing import List
 
 import pandas as pd
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_CONVOKIT_ROOT = SCRIPT_DIR.parent.parent / "Thesis-Data" / "Convokit"
-
-
 def combine_pipeline_csvs_to_lexical_master(
-    convokit_root: str | Path | None = None,
+    convokit_root: str | Path,
     output_filename: str = "lexical_master.csv",
     variations_only: bool = True,
     skip_read_errors: bool = False,
@@ -28,25 +24,7 @@ def combine_pipeline_csvs_to_lexical_master(
       Topic-Variation/
         ...
     """
-    if convokit_root is None:
-        candidates = [
-            DEFAULT_CONVOKIT_ROOT,
-            SCRIPT_DIR.parent.parent / "Thesis-Data alias" / "Convokit",
-            Path.cwd() / "Thesis-Data" / "Convokit",
-            Path.cwd() / "Convokit",
-            Path.home() / "Desktop" / "Thesis-Data" / "Convokit",
-            Path.home() / "Thesis-Data" / "Convokit",
-        ]
-        root = next((p.resolve() for p in candidates if p.exists() and p.is_dir()), None)
-        if root is None:
-            tried = "\n".join(str(p) for p in candidates)
-            raise FileNotFoundError(
-                "Convokit root could not be auto-discovered. "
-                "Pass convokit_root explicitly.\n"
-                f"Tried:\n{tried}"
-            )
-    else:
-        root = Path(convokit_root).expanduser().resolve()
+    root = Path(convokit_root).expanduser().resolve()
 
     if not root.exists() or not root.is_dir():
         alias_hint = ""
@@ -61,6 +39,17 @@ def combine_pipeline_csvs_to_lexical_master(
             or "_df_shard-" in name
             or name.endswith("_lexical_df.csv")
         )
+
+    def _subreddit_from_filename(path: Path) -> str:
+        name = path.name
+        suffixes = ("_lexical_df.csv", "_df.csv")
+        for suffix in suffixes:
+            if name.endswith(suffix):
+                return name[: -len(suffix)]
+        shard_marker = "_df_shard-"
+        if shard_marker in name and name.endswith(".csv"):
+            return name.split(shard_marker, 1)[0]
+        return path.stem
 
     variation_dirs = [p for p in root.iterdir() if p.is_dir()]
     if variations_only:
@@ -85,7 +74,7 @@ def combine_pipeline_csvs_to_lexical_master(
         try:
             df = pd.read_csv(csv_path)
             df["source_variation"] = csv_path.parent.name
-            df["source_file"] = csv_path.name
+            df["subreddit"] = _subreddit_from_filename(csv_path)
             dfs.append(df)
         except (TimeoutError, OSError, pd.errors.ParserError) as exc:
             if skip_read_errors:
