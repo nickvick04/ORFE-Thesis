@@ -12,8 +12,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_CONVOKIT_ROOT = SCRIPT_DIR.parent.parent / "Thesis-Data" / "Convokit"
 
 
-def combine_pipeline_csvs_to_lexical_master(convokit_root: str | Path = DEFAULT_CONVOKIT_ROOT,
-    output_filename: str = "lexical_master.csv",) -> Path:
+def combine_pipeline_csvs_to_lexical_master(
+    convokit_root: str | Path | None = None,
+    output_filename: str = "lexical_master.csv",
+    variations_only: bool = True,
+    skip_read_errors: bool = False,
+) -> Path:
     """Combine pipeline-produced CSV files under Convokit variations into one master CSV.
 
     Expected structure:
@@ -24,27 +28,77 @@ def combine_pipeline_csvs_to_lexical_master(convokit_root: str | Path = DEFAULT_
       Topic-Variation/
         ...
     """
-    root = Path(convokit_root).resolve()
+    if convokit_root is None:
+        candidates = [
+            DEFAULT_CONVOKIT_ROOT,
+            SCRIPT_DIR.parent.parent / "Thesis-Data alias" / "Convokit",
+            Path.cwd() / "Thesis-Data" / "Convokit",
+            Path.cwd() / "Convokit",
+            Path.home() / "Desktop" / "Thesis-Data" / "Convokit",
+            Path.home() / "Thesis-Data" / "Convokit",
+        ]
+        root = next((p.resolve() for p in candidates if p.exists() and p.is_dir()), None)
+        if root is None:
+            tried = "\n".join(str(p) for p in candidates)
+            raise FileNotFoundError(
+                "Convokit root could not be auto-discovered. "
+                "Pass convokit_root explicitly.\n"
+                f"Tried:\n{tried}"
+            )
+    else:
+        root = Path(convokit_root).expanduser().resolve()
+
     if not root.exists() or not root.is_dir():
-        raise FileNotFoundError(f"Convokit root not found: {root}")
+        alias_hint = ""
+        if root.exists() and root.is_file():
+            alias_hint = " (path is a file; if this is a macOS Alias, use the real folder path)"
+        raise FileNotFoundError(f"Convokit root not found: {root}{alias_hint}")
+
+    def _is_pipeline_csv(path: Path) -> bool:
+        name = path.name
+        return (
+            name.endswith("_df.csv")
+            or "_df_shard-" in name
+            or name.endswith("_lexical_df.csv")
+        )
+
+    variation_dirs = [p for p in root.iterdir() if p.is_dir()]
+    if variations_only:
+        variation_dirs = [p for p in variation_dirs if "variation" in p.name.lower()]
 
     csv_files: List[Path] = []
-    for variation_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+    for variation_dir in sorted(variation_dirs):
         variation_csvs = [
             p for p in sorted(variation_dir.glob("*.csv"))
-            if p.name != output_filename
+            if p.name != output_filename and _is_pipeline_csv(p)
         ]
         csv_files.extend(variation_csvs)
 
     if not csv_files:
-        raise FileNotFoundError(f"No CSV files found under variation folders in: {root}")
+        raise FileNotFoundError(
+            f"No pipeline CSV files found under selected folders in: {root}"
+        )
 
     dfs = []
-    for csv_path in csv_files:
-        df = pd.read_csv(csv_path)
-        df["source_variation"] = csv_path.parent.name
-        df["source_file"] = csv_path.name
-        dfs.append(df)
+    for i, csv_path in enumerate(csv_files, start=1):
+        print(f"[{i}/{len(csv_files)}] Reading {csv_path}")
+        try:
+            df = pd.read_csv(csv_path)
+            df["source_variation"] = csv_path.parent.name
+            df["source_file"] = csv_path.name
+            dfs.append(df)
+        except (TimeoutError, OSError, pd.errors.ParserError) as exc:
+            if skip_read_errors:
+                print(f"Skipping unreadable file: {csv_path}\nReason: {exc}")
+                continue
+            raise RuntimeError(
+                f"Failed to read CSV: {csv_path}\n"
+                "If this is in a cloud-synced folder, ensure the file is downloaded locally "
+                "or rerun with skip_read_errors=True."
+            ) from exc
+
+    if not dfs:
+        raise RuntimeError("No readable CSV files were loaded.")
 
     master_df = pd.concat(dfs, ignore_index=True)
     output_path = root / output_filename
