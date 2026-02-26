@@ -8,6 +8,7 @@ from typing import List
 
 import pandas as pd
 
+
 def combine_pipeline_csvs_to_lexical_master(
     convokit_root: str | Path,
     output_filename: str = "lexical_master.csv",
@@ -96,3 +97,33 @@ def combine_pipeline_csvs_to_lexical_master(
     print(f"Combined {len(csv_files)} CSV files into:\n{output_path}")
     print(f"Total rows: {len(master_df)}")
     return output_path
+
+
+def clean_variation_and_subreddit_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize source_variation and subreddit based on hyphen-separated values.
+
+    - source_variation: keep text before first hyphen (lowercased)
+    - subreddit: keep text after first hyphen
+    """
+    required_cols = {"source_variation", "subreddit"}
+    missing = required_cols.difference(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+    cleaned = df.copy()
+    cleaned["source_variation"] = (
+        cleaned["source_variation"]
+        .astype(str)
+        .str.strip()
+        .str.split("-", n=1)
+        .str[0]
+        .str.lower()
+    )
+    cleaned["subreddit"] = (
+        cleaned["subreddit"]
+        .astype(str)
+        .str.strip()
+        .str.split("-", n=1)
+        .str[-1]
+    )
+    return cleaned
