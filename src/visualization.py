@@ -17,9 +17,16 @@ def _with_datetime_index(df):
         raise ValueError("DataFrame must have a datetime index or a 'timestamp' column.")
     return out.sort_index()
 
+def _require_columns(df, cols):
+    '''Raise a readable error when required metric columns are missing.'''
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
 def plot_lexical_trends_monthly(df, metrics=LEXICAL_METRICS):
     '''Plot monthly mean trends for lexical metrics.'''
     ts_df = _with_datetime_index(df)
+    _require_columns(ts_df, metrics)
     monthly = ts_df[metrics].resample("M").mean()
 
     n = len(metrics)
@@ -43,6 +50,7 @@ def plot_lexical_trends_monthly(df, metrics=LEXICAL_METRICS):
 def plot_lexical_trends_yearly(df, metrics=LEXICAL_METRICS):
     '''Plot yearly mean trends for lexical metrics.'''
     ts_df = _with_datetime_index(df)
+    _require_columns(ts_df, metrics)
     yearly = ts_df[metrics].resample("Y").mean()
 
     n = len(metrics)
@@ -78,6 +86,7 @@ def _frequency_bucket(series):
 def plot_complexity_by_user_frequency_over_time(df, metrics=LEXICAL_METRICS, freq="M"):
     '''Plot metric trends over time by fixed user-frequency buckets.'''
     ts_df = _with_datetime_index(df)
+    _require_columns(ts_df, metrics)
     if "num_utterances_by_speaker" not in ts_df.columns:
         raise ValueError("Missing required column: num_utterances_by_speaker")
 
@@ -124,6 +133,7 @@ def plot_complexity_by_user_frequency_over_time(df, metrics=LEXICAL_METRICS, fre
 
 def plot_complexity_by_user_frequency(df, metrics=LEXICAL_METRICS, bins=10):
     '''Visualize average complexity by user posting frequency (num_utterances_by_speaker).'''
+    _require_columns(df, metrics)
     if "num_utterances_by_speaker" not in df.columns:
         raise ValueError("Missing required column: num_utterances_by_speaker")
 
@@ -171,19 +181,21 @@ def plot_lexical_metrics(df, rolling_window=None, resample_freq=None):
     - rolling_window: int for size of rolling average window (post count).
     - resample_freq: str, e.g., 'D', 'W', 'M' to aggregate metrics over time.'''
     
+    ts_df = _with_datetime_index(df)
     metrics = LEXICAL_METRICS
+    _require_columns(ts_df, metrics)
     n = len(metrics)
     fig, axes = plt.subplots(n, 1, figsize=(14, 4*n), sharex=True)
     
     for i, col in enumerate(metrics):
         if resample_freq:
-            series = df[col].resample(resample_freq).mean()
+            series = ts_df[col].resample(resample_freq).mean()
             label = f'{resample_freq}-resampled mean'
         elif rolling_window:
-            series = df[col].rolling(window=rolling_window, min_periods=1).mean()
-            label = f'rolling window={rolling_window})'
+            series = ts_df[col].rolling(window=rolling_window, min_periods=1).mean()
+            label = f'rolling window={rolling_window}'
         else:
-            series = df[col]
+            series = ts_df[col]
             label = 'raw values'
         
         axes[i].plot(series.index, series, color='tab:blue')
@@ -202,7 +214,9 @@ def plot_syntactic_metrics(df, rolling_window=None, resample_freq=None):
     - rolling_window: int for the size of rolling average window
     - resample_freq: str, e.g., 'D', 'W', 'M' to aggregate metrics over time.'''
     
+    ts_df = _with_datetime_index(df)
     metrics = SYNTACTIC_METRICS
+    _require_columns(ts_df, metrics)
     n = len(metrics)
     fig, axes = plt.subplots(n, 1, figsize=(14, 4*n), sharex=True)
     
@@ -210,17 +224,17 @@ def plot_syntactic_metrics(df, rolling_window=None, resample_freq=None):
     if resample_freq:
         method_desc = f'{resample_freq}-resampled mean'
     elif rolling_window:
-        method_desc = f'rolling window={rolling_window})'
+        method_desc = f'rolling window={rolling_window}'
     else:
         method_desc = 'raw values'
     
     for i, col in enumerate(metrics):
         if resample_freq:
-            series = df[col].resample(resample_freq).mean()
+            series = ts_df[col].resample(resample_freq).mean()
         elif rolling_window:
-            series = df[col].rolling(window=rolling_window, min_periods=1).mean()
+            series = ts_df[col].rolling(window=rolling_window, min_periods=1).mean()
         else:
-            series = df[col]
+            series = ts_df[col]
         
         axes[i].plot(series.index, series, color='tab:green')
         axes[i].set_ylabel(col)
