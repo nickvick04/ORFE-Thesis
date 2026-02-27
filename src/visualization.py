@@ -8,6 +8,20 @@ import numpy as np
 LEXICAL_METRICS = ['mtld_score', 'mattr_score', 'yules_k', 'zipf_score', 'aoa_score', 'nawl_ratio']
 SYNTACTIC_METRICS = ['fragment_ratio', 'avg_t_units', 'clause_to_t_unit_ratio', 'mltu']
 
+# human-readable axis labels for each metric
+METRIC_LABELS = {
+    'mtld_score':             'MTLD Score',
+    'mattr_score':            'MATTR Score',
+    'yules_k':                "Yule's K",
+    'zipf_score':             'Zipf Score (avg. word frequency)',
+    'aoa_score':              'Age of Acquisition (years)',
+    'nawl_ratio':             'NAWL Ratio',
+    'fragment_ratio':         'Fragment Ratio',
+    'avg_t_units':            'Avg. T-Units per Utterance',
+    'clause_to_t_unit_ratio': 'Clause-to-T-Unit Ratio',
+    'mltu':                   'Mean Length of T-Unit (words)',
+}
+
 def _with_datetime_index(df):
     '''Return a dataframe indexed by datetime timestamp.'''
     out = df.copy()
@@ -37,7 +51,7 @@ def plot_lexical_trends_monthly(df, metrics=LEXICAL_METRICS):
 
     for i, col in enumerate(metrics):
         axes[i].plot(monthly.index, monthly[col], color="tab:blue", linewidth=2)
-        axes[i].set_ylabel(col)
+        axes[i].set_ylabel(METRIC_LABELS.get(col, col))
         axes[i].grid(True, alpha=0.3)
 
     axes[-1].xaxis.set_major_locator(mdates.MonthLocator(interval=3))
@@ -61,7 +75,7 @@ def plot_lexical_trends_yearly(df, metrics=LEXICAL_METRICS):
 
     for i, col in enumerate(metrics):
         axes[i].plot(yearly.index, yearly[col], color="tab:green", linewidth=2)
-        axes[i].set_ylabel(col)
+        axes[i].set_ylabel(METRIC_LABELS.get(col, col))
         axes[i].grid(True, alpha=0.3)
 
     axes[-1].xaxis.set_major_locator(mdates.YearLocator())
@@ -119,7 +133,7 @@ def plot_complexity_by_user_frequency_over_time(df, metrics=LEXICAL_METRICS, fre
         for b in bucket_order:
             subset = grouped[grouped["frequency_bucket"].astype(str) == b]
             axes[i].plot(subset["timestamp"], subset[col], linewidth=1.8, label=b)
-        axes[i].set_ylabel(col)
+        axes[i].set_ylabel(METRIC_LABELS.get(col, col))
         axes[i].grid(True, alpha=0.3)
         axes[i].legend(title="Posts/User", ncol=3, fontsize=9)
 
@@ -170,7 +184,7 @@ def plot_complexity_by_user_frequency(df, metrics=LEXICAL_METRICS, bins=10):
             ax=axes[i],
             color="tab:orange",
         )
-        axes[i].set_ylabel(col)
+        axes[i].set_ylabel(METRIC_LABELS.get(col, col))
         axes[i].grid(True, axis="y", alpha=0.3)
 
     axes[-1].set_xlabel("User Frequency Bucket (quantiles of num_utterances_by_speaker)")
@@ -179,18 +193,20 @@ def plot_complexity_by_user_frequency(df, metrics=LEXICAL_METRICS, bins=10):
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.show()
 
-def plot_lexical_metrics(df, rolling_window=None, resample_freq=None):
-    '''Plots all lexical metrics from a dataframe on one figure with subplots.
-    Takes two other parameters:
+def plot_lexical_metrics(df, metrics=LEXICAL_METRICS, rolling_window=None, resample_freq=None):
+    '''Plots lexical metrics from a dataframe on one figure with subplots.
+    Parameters:
+    - metrics: list of metric column names to plot (default: LEXICAL_METRICS).
     - rolling_window: int for size of rolling average window (post count).
     - resample_freq: str, e.g., 'D', 'W', 'M' to aggregate metrics over time.'''
-    
+
     ts_df = _with_datetime_index(df)
-    metrics = LEXICAL_METRICS
     _require_columns(ts_df, metrics)
     n = len(metrics)
     fig, axes = plt.subplots(n, 1, figsize=(14, 4*n), sharex=True)
-    
+    if n == 1:
+        axes = [axes]
+
     for i, col in enumerate(metrics):
         if resample_freq:
             series = ts_df[col].resample(resample_freq).mean()
@@ -201,11 +217,11 @@ def plot_lexical_metrics(df, rolling_window=None, resample_freq=None):
         else:
             series = ts_df[col]
             label = 'raw values'
-        
+
         axes[i].plot(series.index, series, color='tab:blue')
-        axes[i].set_ylabel(col)
+        axes[i].set_ylabel(METRIC_LABELS.get(col, col))
         axes[i].grid(True, alpha=0.3)
-    
+
     axes[-1].set_xlabel('Time')
     method_desc = label if (rolling_window or resample_freq) else 'raw'
     fig.suptitle(f'Lexical Metrics Over Time ({method_desc})', fontsize=16)
@@ -239,9 +255,9 @@ def plot_syntactic_metrics(df, rolling_window=None, resample_freq=None):
             series = ts_df[col].rolling(window=rolling_window, min_periods=1).mean()
         else:
             series = ts_df[col]
-        
+
         axes[i].plot(series.index, series, color='tab:green')
-        axes[i].set_ylabel(col)
+        axes[i].set_ylabel(METRIC_LABELS.get(col, col))
         axes[i].grid(True, alpha=0.3)
     
     axes[-1].set_xlabel('Time')
