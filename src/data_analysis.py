@@ -18,7 +18,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
-LEXICAL_METRICS = ["mtld_score", "yules_k", "zipf_score", "aoa_score", "nawl_ratio"]
+LEXICAL_METRICS = ["mtld_score", "mattr_score", "yules_k", "zipf_score", "aoa_score", "nawl_ratio"]
 
 
 def combine_pipeline_csvs_to_lexical_master(

@@ -5,7 +5,7 @@ import seaborn as sns
 import numpy as np
 
 # define the metrics
-LEXICAL_METRICS = ['mtld_score', 'yules_k', 'zipf_score', 'aoa_score', 'nawl_ratio']
+LEXICAL_METRICS = ['mtld_score', 'mattr_score', 'yules_k', 'zipf_score', 'aoa_score', 'nawl_ratio']
 SYNTACTIC_METRICS = ['fragment_ratio', 'avg_t_units', 'clause_to_t_unit_ratio', 'mltu']
 
 def _with_datetime_index(df):

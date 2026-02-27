@@ -27,6 +27,20 @@ def mtld_score(clean_tokens):
 
     return mtld_score
 
+def mattr_score(clean_tokens, window_length=50):
+    '''Function that returns the MATTR (Moving Average Type-Token Ratio) score for a given
+    set of cleaned, lemmatized tokens. MATTR computes TTR over a sliding window of fixed
+    size and averages across all windows, making it length-independent by construction.
+    A higher MATTR score indicates higher lexical diversity.
+
+    window_length: number of tokens per window (default 50, per McCarthy & Jarvis 2010).
+    Returns NaN if the token list is shorter than the window.'''
+
+    if len(clean_tokens) < window_length:
+        return np.nan
+
+    return ld.mattr(clean_tokens, window_length=window_length)
+
 def yules_K(clean_tokens):
     '''Function that returns Yule's characteristic constant K for a given set of 
     cleaned, lemmatized tokens. A lower Yule's K indicates higher lexical diversity.'''
@@ -119,6 +133,9 @@ def compute_lexical_vals(df, drop_token_column=True):
 
     print("Computing MTLD values...")
     df["mtld_score"] = df["final_lexical_tokens"].apply(mtld_score)
+
+    print("Computing MATTR values...")
+    df["mattr_score"] = df["final_lexical_tokens"].apply(mattr_score)
 
     print("Computing Yules K values...")
     df["yules_k"] = df["final_lexical_tokens"].apply(yules_K)
