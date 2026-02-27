@@ -141,20 +141,21 @@ def _compute_post_depth(utt_id, parent_by_utt, memo, visiting):
     return depth
 
 def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
-    '''Stream utterances.jsonl directly, keep longest valid post per speaker globally,
-    then yield rows in batches.'''
+    '''Stream utterances.jsonl directly, keep longest valid post per speaker per month
+    globally, then yield rows in batches.'''
 
     utt_path = os.path.join(corpus_dir, "utterances.jsonl")
     if not os.path.isfile(utt_path):
         raise FileNotFoundError(f"Could not find utterances.jsonl at {utt_path}")
 
-    best_by_speaker = {}
-    counts_by_speaker = {}
+    best_by_speaker_month = {}  # key: (speaker_id, (year, month))
+    counts_by_speaker = {}      # all-time total per speaker
+    counts_by_speaker_month = {}  # count per (speaker_id, (year, month))
     parent_by_utt = {}
     score_by_utt = {}
     direct_reply_counts = {}
 
-    # Pass 1: compute per-speaker count and longest utterance metadata.
+    # Pass 1: compute per-speaker-month count and longest utterance metadata.
     with open(utt_path, "r", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -182,27 +183,34 @@ def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
             if not HAS_LETTER_RE.search(raw_text):
                 continue
 
+            try:
+                dt = datetime.fromtimestamp(int(timestamp))
+            except (TypeError, ValueError, OSError):
+                continue
+
+            year_month = (dt.year, dt.month)
+            speaker_month_key = (speaker_id, year_month)
+
             counts_by_speaker[speaker_id] = counts_by_speaker.get(speaker_id, 0) + 1
+            counts_by_speaker_month[speaker_month_key] = counts_by_speaker_month.get(speaker_month_key, 0) + 1
 
             post_length = len(raw_text)
-            prev = best_by_speaker.get(speaker_id)
+            prev = best_by_speaker_month.get(speaker_month_key)
             if prev is None or post_length > prev["post_length"]:
-                try:
-                    dt = datetime.fromtimestamp(int(timestamp))
-                except (TypeError, ValueError, OSError):
-                    continue
-                best_by_speaker[speaker_id] = {
+                best_by_speaker_month[speaker_month_key] = {
                     "utterance_id": utt_id,
                     "timestamp": dt,
                     "post_length": post_length,
                 }
 
-    selected_utterance_to_speaker = {
-        row["utterance_id"]: speaker_id for speaker_id, row in best_by_speaker.items()
+    selected_utterance_to_key = {
+        row["utterance_id"]: speaker_month_key
+        for speaker_month_key, row in best_by_speaker_month.items()
     }
     depth_cache = {}
     print(
-        f"Selected {len(best_by_speaker)} speakers and {len(selected_utterance_to_speaker)} utterances from {utt_path}"
+        f"Selected {len(best_by_speaker_month)} speaker-month pairs and "
+        f"{len(selected_utterance_to_key)} utterances from {utt_path}"
     )
 
     # Pass 2: emit only selected utterances in batches.
@@ -218,16 +226,18 @@ def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
                 continue
 
             utt_id, _, raw_text, _ = _extract_utterance_fields_json(obj)
-            speaker_id = selected_utterance_to_speaker.get(utt_id)
-            if speaker_id is None:
+            speaker_month_key = selected_utterance_to_key.get(utt_id)
+            if speaker_month_key is None:
                 continue
 
+            speaker_id, year_month = speaker_month_key
             rows.append({
                 "utterance_id": utt_id,
                 "speaker_id": speaker_id,
                 "raw_text": raw_text,
-                "timestamp": best_by_speaker[speaker_id]["timestamp"],
+                "timestamp": best_by_speaker_month[speaker_month_key]["timestamp"],
                 "num_utterances_by_speaker": counts_by_speaker[speaker_id],
+                "num_utterances_by_speaker_month": counts_by_speaker_month[speaker_month_key],
                 "post_depth": _compute_post_depth(utt_id, parent_by_utt, depth_cache, set()),
                 "score": score_by_utt.get(utt_id),
                 "num_direct_replies": direct_reply_counts.get(utt_id, 0),
@@ -531,10 +541,10 @@ def remove_fragments(sentences):
 # Pre-Processing Functions
 # ----------------------------------------------------------------------------------------
 def filter_df(df):
-    '''Function that pre-processes a dataframe containing textual social 
-    media data by removing deleted/removed utterances, bot utterances, and 
+    '''Function that pre-processes a dataframe containing textual social
+    media data by removing deleted/removed utterances, bot utterances, and
     utterances not containing letters. Retains only the longest post per unique
-    user while recording the number of utterances they authored in a new column.'''
+    user per month, recording all-time and per-month utterance counts in new columns.'''
 
     print("Removing spam utterances...")
 
@@ -547,24 +557,30 @@ def filter_df(df):
     # remove utterances without a letter
     df = df[df["raw_text"].str.contains(HAS_LETTER_RE, regex=True)]
 
-    print("Selecting longest utterances...")
+    print("Selecting longest utterances per user per month...")
 
-    # compute number of posts per speaker
+    # compute all-time number of posts per speaker
     df["num_utterances_by_speaker"] = df.groupby("speaker_id")["raw_text"].transform("count")
+
+    # extract year-month for grouping
+    df["year_month"] = df["timestamp"].dt.to_period("M")
+
+    # compute number of posts per speaker per month
+    df["num_utterances_by_speaker_month"] = df.groupby(["speaker_id", "year_month"])["raw_text"].transform("count")
 
     # compute post length (character count)
     df["post_length"] = df["raw_text"].str.len()
 
-    # retain only the longest post per speaker
-    df = df.loc[df.groupby("speaker_id")["post_length"].idxmax()]
+    # retain only the longest post per speaker per month
+    df = df.loc[df.groupby(["speaker_id", "year_month"])["post_length"].idxmax()]
 
-    # drop helper column
-    df = df.drop(columns=["post_length"])
+    # drop helper columns
+    df = df.drop(columns=["post_length", "year_month"])
 
     return df
 
 def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE, num_shards=1, shard_index=0):
-    '''Stream corpus once, keep only the longest valid post per speaker globally,
+    '''Stream corpus once, keep only the longest valid post per speaker per month,
     then yield those rows in batches.'''
 
     if num_shards < 1:
@@ -572,11 +588,12 @@ def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE, num_shards=1, sh
     if shard_index < 0 or shard_index >= num_shards:
         raise ValueError("shard_index must satisfy 0 <= shard_index < num_shards")
 
-    print("Extracting longest post per user...")
+    print("Extracting longest post per user per month...")
 
     # keep metadata only in pass 1 to avoid storing many full texts in memory.
-    best_by_speaker = {}
-    counts_by_speaker = {}
+    best_by_speaker_month = {}  # key: (speaker_id, (year, month))
+    counts_by_speaker = {}      # all-time total per speaker
+    counts_by_speaker_month = {}  # count per (speaker_id, (year, month))
     parent_by_utt = {}
     score_by_utt = {}
     direct_reply_counts = {}
@@ -606,37 +623,50 @@ def corpus_longest_posts_batches(corpus, batch_size=BATCH_SIZE, num_shards=1, sh
         speaker_id = utt.speaker.id
         if _speaker_shard_index(speaker_id, num_shards) != shard_index:
             continue
+
+        try:
+            dt = datetime.fromtimestamp(int(utt.timestamp))
+        except (TypeError, ValueError, OSError):
+            continue
+
+        year_month = (dt.year, dt.month)
+        speaker_month_key = (speaker_id, year_month)
+
         counts_by_speaker[speaker_id] = counts_by_speaker.get(speaker_id, 0) + 1
+        counts_by_speaker_month[speaker_month_key] = counts_by_speaker_month.get(speaker_month_key, 0) + 1
 
         post_length = len(raw_text)
-        prev = best_by_speaker.get(speaker_id)
+        prev = best_by_speaker_month.get(speaker_month_key)
         # keep first max-length post encountered (matches idxmax tie behavior)
         if prev is None or post_length > prev["post_length"]:
-            best_by_speaker[speaker_id] = {
+            best_by_speaker_month[speaker_month_key] = {
                 "utterance_id": utt.id,
-                "timestamp": datetime.fromtimestamp(int(utt.timestamp)),
+                "timestamp": dt,
                 "post_length": post_length,
             }
 
-    selected_utterance_to_speaker = {
-        row["utterance_id"]: speaker_id for speaker_id, row in best_by_speaker.items()
+    selected_utterance_to_key = {
+        row["utterance_id"]: speaker_month_key
+        for speaker_month_key, row in best_by_speaker_month.items()
     }
     depth_cache = {}
 
     rows = []
     # pass 2: recover raw text only for selected utterances and emit in batches.
     for utt in corpus.iter_utterances():
-        speaker_id = selected_utterance_to_speaker.get(utt.id)
-        if speaker_id is None:
+        speaker_month_key = selected_utterance_to_key.get(utt.id)
+        if speaker_month_key is None:
             continue
 
-        row = best_by_speaker[speaker_id]
+        speaker_id, year_month = speaker_month_key
+        row = best_by_speaker_month[speaker_month_key]
         rows.append({
             "utterance_id": utt.id,
             "speaker_id": speaker_id,
             "raw_text": utt.text,
             "timestamp": row["timestamp"],
             "num_utterances_by_speaker": counts_by_speaker[speaker_id],
+            "num_utterances_by_speaker_month": counts_by_speaker_month[speaker_month_key],
             "post_depth": _compute_post_depth(utt.id, parent_by_utt, depth_cache, set()),
             "score": score_by_utt.get(utt.id),
             "num_direct_replies": direct_reply_counts.get(utt.id, 0),
