@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import pandas as pd
 import seaborn as sns
+import numpy as np
 
 # define the metrics
 LEXICAL_METRICS = ['mtld_score', 'yules_k', 'zipf_score', 'aoa_score', 'nawl_ratio']
@@ -71,17 +72,20 @@ def plot_lexical_trends_yearly(df, metrics=LEXICAL_METRICS):
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.show()
 
-def _frequency_bucket(series):
-    '''Map num_utterances_by_speaker into fixed user-frequency buckets.'''
-    # Bucket boundaries are right-inclusive:
-    # 1-3 => (0,3], 4-6 => (3,6], 6-9 label corresponds to (6,9].
-    return pd.cut(
-        series,
-        bins=[0, 3, 6, 9, 20, float("inf")],
-        labels=["1-3", "4-6", "6-9", "10-20", "20+"],
-        include_lowest=True,
-        right=True,
-    )
+def _frequency_bucket(series, q=5):
+    '''Map num_utterances_by_speaker into quantile-based user-frequency buckets.
+    Uses pd.qcut so each bucket contains approximately equal numbers of users.
+    q controls the number of buckets (default 5); duplicates are dropped so the
+    actual number of buckets may be smaller when many users share the same count.'''
+    _, bins = pd.qcut(series, q=q, retbins=True, duplicates='drop')
+    bins_int = np.round(bins).astype(int)
+    n = len(bins_int) - 1
+    labels = []
+    for i in range(n):
+        lo = int(bins_int[i]) + (1 if i > 0 else 0)
+        hi = int(bins_int[i + 1])
+        labels.append(f"{lo}+" if i == n - 1 else f"{lo}-{hi}")
+    return pd.cut(series, bins=bins, labels=labels, include_lowest=True)
 
 def plot_complexity_by_user_frequency_over_time(df, metrics=LEXICAL_METRICS, freq="M"):
     '''Plot metric trends over time by fixed user-frequency buckets.'''
@@ -105,7 +109,7 @@ def plot_complexity_by_user_frequency_over_time(df, metrics=LEXICAL_METRICS, fre
         .reset_index()
     )
 
-    bucket_order = ["1-3", "4-6", "6-9", "10-20", "20+"]
+    bucket_order = ts_df["frequency_bucket"].cat.categories.tolist()
     n = len(metrics)
     fig, axes = plt.subplots(n, 1, figsize=(14, 3.8 * n), sharex=True)
     if n == 1:
