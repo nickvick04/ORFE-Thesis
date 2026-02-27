@@ -4,7 +4,9 @@
 # ----------------------------------------------------------------------------------------
 
 from pathlib import Path
-from typing import Any, List, Sequence
+from typing import Any, List, Optional, Sequence
+
+import pymannkendall as mk
 
 import numpy as np
 import pandas as pd
@@ -15,6 +17,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
+
+LEXICAL_METRICS = ["mtld_score", "yules_k", "zipf_score", "aoa_score", "nawl_ratio"]
 
 
 def combine_pipeline_csvs_to_lexical_master(
@@ -255,3 +259,162 @@ def run_log_linear_regression(
         "coef_df": coef_df,
         "feature_columns": feature_cols,
     }
+
+
+# ----------------------------------------------------------------------------------------
+# Mann-Kendall Trend Test
+# ----------------------------------------------------------------------------------------
+
+def _bh_adjust(p_values: np.ndarray) -> np.ndarray:
+    """Benjamini-Hochberg FDR correction. Returns adjusted p-values capped at 1.
+
+    Adjusted p_(k) = min_{j >= k} ( p_(j) * m / j ) where tests are sorted
+    by ascending raw p-value and m is the total number of tests.
+    """
+    m = len(p_values)
+    order = np.argsort(p_values)
+    sorted_p = p_values[order]
+    adj = np.minimum(1.0, sorted_p * m / np.arange(1, m + 1))
+    # Enforce monotonicity right-to-left so that a larger p cannot have a
+    # smaller adjusted value than a p ranked above it.
+    for i in range(m - 2, -1, -1):
+        adj[i] = min(adj[i], adj[i + 1])
+    result = np.empty(m)
+    result[order] = adj
+    return result
+
+
+def run_mann_kendall_tests(
+    df: pd.DataFrame,
+    metrics: Optional[Sequence[str]] = None,
+    time_col: str = "timestamp",
+    freq: str = "Y",
+    alpha: float = 0.05,
+    group_col: Optional[str] = None,
+) -> pd.DataFrame:
+    """Run Mann-Kendall trend tests on lexical metrics aggregated over time.
+
+    For each metric (and optionally each level of group_col), the time series
+    is resampled to `freq` frequency, period means are computed, and the
+    Mann-Kendall test is applied to the resulting sequence.  Benjamini-Hochberg
+    FDR correction is applied jointly across all (metric x group) tests.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Master lexical DataFrame with a timestamp column and metric columns.
+    metrics : list of str, optional
+        Metric columns to test.  Defaults to LEXICAL_METRICS.
+    time_col : str
+        Name of the datetime column (default 'timestamp').
+    freq : str
+        Pandas resampling frequency string.  'Y' is recommended for a
+        2007-2018 dataset (12 annual data points); 'M' gives monthly
+        resolution (~132 points) at the cost of more noise.
+    alpha : float
+        FDR significance threshold after BH correction (default 0.05).
+    group_col : str or None
+        If provided, run tests separately for each value of this column
+        (e.g., 'subreddit' or 'source_variation').  When None, a single
+        test is run over the full dataset (group label = 'all').
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (metric, group) with columns:
+          metric       – name of the lexical metric
+          group        – group label ('all' when group_col is None)
+          n_periods    – number of resampled time periods with valid data
+          tau          – Kendall tau (rank correlation with time index)
+          sens_slope   – Theil-Sen median slope (metric units per period)
+          p_value      – raw two-sided Mann-Kendall p-value
+          p_adjusted   – BH-corrected p-value
+          significant  – True if p_adjusted <= alpha
+          trend        – 'increasing', 'decreasing', or 'no trend'
+    """
+    if metrics is None:
+        metrics = LEXICAL_METRICS
+
+    missing_metrics = [m for m in metrics if m not in df.columns]
+    if missing_metrics:
+        raise ValueError(f"Missing metric columns: {missing_metrics}")
+    if time_col not in df.columns:
+        raise ValueError(f"Missing time column: '{time_col}'")
+
+    work = df.copy()
+    work[time_col] = pd.to_datetime(work[time_col], errors="coerce")
+    work = work.dropna(subset=[time_col]).set_index(time_col).sort_index()
+
+    # Build list of (label, sub-dataframe) pairs to iterate over.
+    if group_col is not None:
+        if group_col not in df.columns:
+            raise ValueError(f"Missing group column: '{group_col}'")
+        groups: List[tuple] = [
+            (str(name), grp) for name, grp in work.groupby(group_col)
+        ]
+    else:
+        groups = [("all", work)]
+
+    records = []
+    for group_label, grp_df in groups:
+        resampled = grp_df[list(metrics)].resample(freq).mean().dropna(how="all")
+
+        for metric in metrics:
+            series = resampled[metric].dropna().values
+            n = len(series)
+
+            if n < 4:
+                # Mann-Kendall is unreliable with fewer than 4 observations.
+                records.append(
+                    dict(
+                        metric=metric,
+                        group=group_label,
+                        n_periods=n,
+                        tau=np.nan,
+                        sens_slope=np.nan,
+                        p_value=np.nan,
+                        p_adjusted=np.nan,
+                        significant=False,
+                        trend="insufficient data",
+                    )
+                )
+                continue
+
+            result = mk.original_test(series)
+
+            records.append(
+                dict(
+                    metric=metric,
+                    group=group_label,
+                    n_periods=n,
+                    tau=round(result.Tau, 4),
+                    sens_slope=round(result.slope, 6),
+                    p_value=result.p,
+                    p_adjusted=np.nan,
+                    significant=False,
+                    trend="",
+                )
+            )
+
+    result_df = pd.DataFrame(records)
+
+    # Apply BH correction across all tests with a valid p-value.
+    valid = result_df["p_value"].notna()
+    if valid.any():
+        raw_p = result_df.loc[valid, "p_value"].to_numpy(dtype=float)
+        adj_p = _bh_adjust(raw_p)
+        result_df.loc[valid, "p_adjusted"] = np.round(adj_p, 6)
+        result_df.loc[valid, "significant"] = adj_p <= alpha
+
+    # Assign human-readable trend labels.
+    def _label(row: pd.Series) -> str:
+        if pd.isna(row["tau"]):
+            return "insufficient data"
+        if not row["significant"]:
+            return "no trend"
+        return "increasing" if row["tau"] > 0 else "decreasing"
+
+    result_df["trend"] = result_df.apply(_label, axis=1)
+    result_df["p_value"] = result_df["p_value"].round(6)
+
+    return result_df
