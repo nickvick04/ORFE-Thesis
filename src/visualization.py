@@ -194,11 +194,19 @@ def plot_complexity_by_user_frequency(df, metrics=LEXICAL_METRICS, bins=10):
     plt.show()
 
 def plot_lexical_metrics(df, metrics=LEXICAL_METRICS, rolling_window=None, resample_freq=None):
-    '''Plots lexical metrics from a dataframe on one figure with subplots.
+    '''Plots lexical metrics from a dataframe on one figure with subplots, with a
+    shaded 95% confidence interval band around each mean line.
+
     Parameters:
     - metrics: list of metric column names to plot (default: LEXICAL_METRICS).
     - rolling_window: int for size of rolling average window (post count).
-    - resample_freq: str, e.g., 'D', 'W', 'M' to aggregate metrics over time.'''
+      The band shows ±1.96 * (rolling SD / sqrt(rolling n)) at each point.
+    - resample_freq: str, e.g., 'D', 'W', 'M' to aggregate metrics over time.
+      The band shows ±1.96 * (SD / sqrt(n)) within each period — i.e., the 95%
+      confidence interval on the period mean, not the spread of individual posts.
+
+    Note: bands are only drawn when rolling_window or resample_freq is supplied,
+    since raw (unaggregated) values have no within-period uncertainty to display.'''
 
     ts_df = _with_datetime_index(df)
     _require_columns(ts_df, metrics)
@@ -209,16 +217,31 @@ def plot_lexical_metrics(df, metrics=LEXICAL_METRICS, rolling_window=None, resam
 
     for i, col in enumerate(metrics):
         if resample_freq:
-            series = ts_df[col].resample(resample_freq).mean()
-            label = f'{resample_freq}-resampled mean'
+            resampled  = ts_df[col].resample(resample_freq).agg(['mean', 'std', 'count'])
+            mean       = resampled['mean']
+            margin     = 1.96 * resampled['std'] / np.sqrt(resampled['count'])
+            label      = f'{resample_freq}-resampled mean ± 95% CI'
         elif rolling_window:
-            series = ts_df[col].rolling(window=rolling_window, min_periods=1).mean()
-            label = f'rolling window={rolling_window}'
+            mean       = ts_df[col].rolling(window=rolling_window, min_periods=1).mean()
+            roll_std   = ts_df[col].rolling(window=rolling_window, min_periods=1).std()
+            roll_n     = ts_df[col].rolling(window=rolling_window, min_periods=1).count()
+            margin     = 1.96 * roll_std / np.sqrt(roll_n)
+            label      = f'rolling mean ± 95% CI (window={rolling_window})'
         else:
-            series = ts_df[col]
-            label = 'raw values'
+            mean       = ts_df[col]
+            margin     = None
+            label      = 'raw values'
 
-        axes[i].plot(series.index, series, color='tab:blue')
+        axes[i].plot(mean.index, mean, color='tab:blue', linewidth=1.8)
+        if margin is not None:
+            axes[i].fill_between(
+                mean.index,
+                mean - margin,
+                mean + margin,
+                color='tab:blue',
+                alpha=0.25,
+                linewidth=0,
+            )
         axes[i].set_ylabel(METRIC_LABELS.get(col, col))
         axes[i].grid(True, alpha=0.3)
 
