@@ -18,7 +18,14 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
-LEXICAL_METRICS = ["mtld_score", "mattr_score", "yules_k", "zipf_score", "aoa_score", "nawl_ratio"]
+LEXICAL_METRICS = [
+    "mtld_score",
+    # "mattr_score",  # uncomment once pipeline has been re-run with MATTR
+    "yules_k",
+    "zipf_score",
+    "aoa_score",
+    "nawl_ratio",
+]
 
 
 def combine_pipeline_csvs_to_lexical_master(
@@ -81,11 +88,31 @@ def combine_pipeline_csvs_to_lexical_master(
             f"No pipeline CSV files found under selected folders in: {root}"
         )
 
+    EXPECTED_COLS = {
+        "timestamp", "utterance_id", "speaker_id", "raw_text",
+        "num_utterances_by_speaker", "num_utterances_by_speaker_month",
+        "post_depth", "score", "num_direct_replies",
+    }
+
     dfs = []
     for i, csv_path in enumerate(csv_files, start=1):
         print(f"[{i}/{len(csv_files)}] Reading {csv_path}")
         try:
             df = pd.read_csv(csv_path)
+
+            # Guard: detect headerless CSVs (first data row used as column names).
+            # Expected columns are all strings; if any core column is missing and
+            # one of the column names looks numeric, the file is likely headerless.
+            missing_core = EXPECTED_COLS - set(df.columns)
+            numeric_col_names = [c for c in df.columns if str(c).replace(".", "", 1).lstrip("-").isdigit()]
+            if missing_core and numeric_col_names:
+                raise RuntimeError(
+                    f"CSV appears to have been written without a header row "
+                    f"(column names look like data values: {numeric_col_names[:5]}).\n"
+                    f"Missing expected columns: {sorted(missing_core)}.\n"
+                    f"Re-run the pipeline for this corpus to regenerate: {csv_path}"
+                )
+
             df["source_variation"] = csv_path.parent.name
             df["subreddit"] = _subreddit_from_filename(csv_path)
             dfs.append(df)
