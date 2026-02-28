@@ -58,9 +58,8 @@ def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE, num_
         df_batch = compute_lexical_vals(df_batch)
         df_batch = compute_syntactic_vals(df_batch)
 
-        df_batch.set_index('timestamp', inplace=True)
         # write to new file if first batch, o/w append to existing file
-        df_batch.to_csv(output_path, mode="w" if first_batch else "a", header=first_batch)
+        df_batch.to_csv(output_path, mode="w" if first_batch else "a", header=first_batch, index=False)
 
         # udpate boolean and index
         first_batch = False
@@ -90,8 +89,7 @@ def run_lexical_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
         print(f"Currently processing lexical batch: {i}")
         df_batch = compute_lexical_vals(df_batch)
 
-        df_batch.set_index('timestamp', inplace=True)
-        df_batch.to_csv(output_path, mode="w" if first_batch else "a", header=first_batch)
+        df_batch.to_csv(output_path, mode="w" if first_batch else "a", header=first_batch, index=False)
 
         first_batch = False
         i += 1
