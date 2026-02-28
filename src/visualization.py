@@ -5,13 +5,20 @@ import seaborn as sns
 import numpy as np
 
 # define the metrics
-LEXICAL_METRICS = ['mtld_score', 'mattr_score', 'yules_k', 'zipf_score', 'aoa_score', 'nawl_ratio']
+LEXICAL_METRICS = [
+    'mtld_score',
+    # 'mattr_score',  # uncomment once pipeline has been re-run with MATTR
+    'yules_k',
+    'zipf_score',
+    'aoa_score',
+    'nawl_ratio',
+]
 SYNTACTIC_METRICS = ['fragment_ratio', 'avg_t_units', 'clause_to_t_unit_ratio', 'mltu']
 
 # human-readable axis labels for each metric
 METRIC_LABELS = {
     'mtld_score':             'MTLD Score',
-    'mattr_score':            'MATTR Score',
+    # 'mattr_score':            'MATTR Score',
     'yules_k':                "Yule's K",
     'zipf_score':             'Zipf Score (avg. word frequency)',
     'aoa_score':              'Age of Acquisition (years)',
