@@ -17,8 +17,8 @@ conda activate thesis-env
 mkdir -p /scratch/network/nv9344/Thesis/logs
 cd /scratch/network/nv9344/Thesis/ORFE-Thesis/src
 
-INPUT="/scratch/network/nv9344/Thesis/Thesis-Data/Convokit/lexical_master.csv"
-OUTPUT="/scratch/network/nv9344/Thesis/Thesis-Data/Convokit/lexical_temporal.csv"
+INPUT="/scratch/network/nv9344/Thesis/ORFE-Thesis/Data/lexical_master.csv"
+OUTPUT="/scratch/network/nv9344/Thesis/ORFE-Thesis/Data/lexical_temporal.csv"
 
 echo "Starting temporal aggregation pipeline"
 echo "Input:  ${INPUT}"

@@ -12,7 +12,7 @@ from pathlib import Path
 from run_pipeline import run_temporal_pipeline
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_CONVOKIT_ROOT = SCRIPT_DIR.parent.parent / "Thesis-Data" / "Convokit"
+DEFAULT_DATA_DIR = SCRIPT_DIR.parent / "Data"
 
 
 def main():
@@ -23,22 +23,22 @@ def main():
     parser.add_argument(
         "--input",
         type=str,
-        default=str(DEFAULT_CONVOKIT_ROOT / "lexical_master.csv"),
-        help="Path to the combined utterance-level CSV (default: Thesis-Data/Convokit/lexical_master.csv)",
+        default=str(DEFAULT_DATA_DIR / "lexical_master.csv"),
+        help="Path to the combined utterance-level CSV (default: ORFE-Thesis/Data/lexical_master.csv)",
     )
 
     parser.add_argument(
         "--output",
         type=str,
-        default=str(DEFAULT_CONVOKIT_ROOT / "lexical_temporal.csv"),
-        help="Destination path for the monthly panel CSV (default: Thesis-Data/Convokit/lexical_temporal.csv)",
+        default=str(DEFAULT_DATA_DIR / "lexical_temporal.csv"),
+        help="Destination path for the monthly panel CSV (default: ORFE-Thesis/Data/lexical_temporal.csv)",
     )
 
     parser.add_argument(
-        "--convokit_root",
+        "--data_dir",
         type=str,
-        default=str(DEFAULT_CONVOKIT_ROOT),
-        help="Override the Convokit root directory (adjusts default --input and --output paths)",
+        default=str(DEFAULT_DATA_DIR),
+        help="Override the Data directory (adjusts default --input and --output paths)",
     )
 
     parser.add_argument(
@@ -51,13 +51,13 @@ def main():
 
     args = parser.parse_args()
 
-    # if a custom convokit_root is given but input/output were left at defaults, re-derive them
-    if args.convokit_root != str(DEFAULT_CONVOKIT_ROOT):
-        root = Path(args.convokit_root)
-        if args.input == str(DEFAULT_CONVOKIT_ROOT / "lexical_master.csv"):
-            args.input = str(root / "lexical_master.csv")
-        if args.output == str(DEFAULT_CONVOKIT_ROOT / "lexical_temporal.csv"):
-            args.output = str(root / "lexical_temporal.csv")
+    # if a custom data_dir is given but input/output were left at defaults, re-derive them
+    if args.data_dir != str(DEFAULT_DATA_DIR):
+        data_dir = Path(args.data_dir)
+        if args.input == str(DEFAULT_DATA_DIR / "lexical_master.csv"):
+            args.input = str(data_dir / "lexical_master.csv")
+        if args.output == str(DEFAULT_DATA_DIR / "lexical_temporal.csv"):
+            args.output = str(data_dir / "lexical_temporal.csv")
 
     if not os.path.isfile(args.input):
         print(f"ERROR: Input file not found:\n{args.input}")
