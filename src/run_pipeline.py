@@ -5,6 +5,7 @@
 # imports
 import os
 import gc
+import pandas as pd
 from data_preprocessing import corpus_longest_posts_batches, corpus_longest_posts_batches_from_jsonl
 from lexical_analysis_functions import compute_lexical_vals
 from visualization import *
@@ -95,3 +96,37 @@ def run_lexical_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
         i += 1
         del df_batch
         gc.collect()
+
+def run_temporal_pipeline(input_path: str, output_path: str):
+    '''Reads the combined utterance-level lexical_master.csv, aggregates all utterances
+    to (subreddit, year_month) monthly corpora, computes corpus-level lexical metrics,
+    and writes the resulting panel to output_path as a single CSV.
+
+    Corpus-level metrics (MATTR, MTLD, Yule's K, NAWL) are computed on the concatenated
+    token list for each monthly cell rather than averaged from utterance-level scores.
+    Zipf and AoA are token-count-weighted means of the utterance-level scores.
+
+    Output schema
+    -------------
+    subreddit, year_month, source_variation,
+    n_utterances, n_speakers, corpus_token_count,
+    mattr_score, mtld_score, yules_k,
+    zipf_score, aoa_score, nawl_ratio
+
+    Parameters
+    ----------
+    input_path  : str  Path to lexical_master.csv.
+    output_path : str  Destination path for the output CSV (e.g. lexical_temporal.csv).
+    '''
+
+    from temporal import aggregate_temporal_metrics, NEEDED_COLS
+
+    print(f"Reading utterance-level data from: {input_path}")
+    df = pd.read_csv(input_path, usecols=NEEDED_COLS, low_memory=False)
+    print(f"Loaded {len(df):,} utterances across {df['subreddit'].nunique()} subreddits.")
+
+    temporal_df = aggregate_temporal_metrics(df)
+
+    print(f"\nWriting temporal panel to: {output_path}")
+    temporal_df.to_csv(output_path, index=False)
+    print("Done.")
