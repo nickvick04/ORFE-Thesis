@@ -140,9 +140,21 @@ def _compute_post_depth(utt_id, parent_by_utt, memo, visiting):
     memo[utt_id] = depth
     return depth
 
-def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
+def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE, num_shards=1, shard_index=0):
     '''Stream utterances.jsonl directly, keep longest valid post per speaker per month
-    globally, then yield rows in batches.'''
+    globally, then yield rows in batches.
+
+    num_shards / shard_index mirror the same parameters on
+    corpus_longest_posts_batches so the two paths are interchangeable.
+    Each speaker is deterministically assigned to exactly one shard via
+    _speaker_shard_index, so parallel SLURM array jobs produce non-overlapping
+    output files that can be concatenated.
+    '''
+
+    if num_shards < 1:
+        raise ValueError("num_shards must be >= 1")
+    if shard_index < 0 or shard_index >= num_shards:
+        raise ValueError("shard_index must satisfy 0 <= shard_index < num_shards")
 
     utt_path = os.path.join(corpus_dir, "utterances.jsonl")
     if not os.path.isfile(utt_path):
@@ -190,6 +202,10 @@ def corpus_longest_posts_batches_from_jsonl(corpus_dir, batch_size=BATCH_SIZE):
 
             year_month = (dt.year, dt.month)
             speaker_month_key = (speaker_id, year_month)
+
+            # shard filter: assign each speaker deterministically to one shard
+            if _speaker_shard_index(speaker_id, num_shards) != shard_index:
+                continue
 
             counts_by_speaker[speaker_id] = counts_by_speaker.get(speaker_id, 0) + 1
             counts_by_speaker_month[speaker_month_key] = counts_by_speaker_month.get(speaker_month_key, 0) + 1

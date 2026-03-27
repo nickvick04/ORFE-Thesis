@@ -56,6 +56,13 @@ def main():
         default=0,
         help="Zero-based shard index for this job"
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Worker processes for parallel Stanza parsing. "
+             "Set to match --cpus-per-task in your SLURM script."
+    )
 
     args = parser.parse_args()
 
@@ -75,6 +82,7 @@ def main():
         batch_size=args.batch_size,
         num_shards=args.num_shards,
         shard_index=args.shard_index,
+        n_workers=args.workers,
     )
 
 if __name__ == "__main__":

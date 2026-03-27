@@ -3,6 +3,7 @@
 # Code Author: Nicholas Vickery, Princeton ORFE '26
 # ----------------------------------------------------------------------------------------
 # general imports
+import multiprocessing
 import numpy as np
 from tqdm import tqdm
 import nltk
@@ -14,12 +15,10 @@ from nltk.tree import ParentedTree
 
 import stanza
 
-stanza_parser = stanza.Pipeline(
-    "en",
-    processors="tokenize,pos,constituency",
-    use_gpu=False,
-    download_method=None
-)
+# Stanza parser is NOT initialised at import time so that worker processes can
+# be forked cleanly before the model is loaded.  Call _init_stanza() (or let
+# create_parented_tree do so lazily) before parsing.
+stanza_parser = None
 
 # Guardrails to avoid parser memory blow-ups on pathological long sentences.
 MAX_PARSE_CHARS = 1200
@@ -27,6 +26,19 @@ MAX_PARSE_TOKENS = 120
 
 # import data processing functions
 from data_preprocessing import is_complete_sentence, clean_tokens_lexical, clean_tokens_syntactic, remove_fragments
+
+
+def _init_stanza():
+    """Initialise (or return the already-cached) Stanza pipeline in the
+    current process.  Safe to call multiple times; only loads the model once."""
+    global stanza_parser
+    if stanza_parser is None:
+        stanza_parser = stanza.Pipeline(
+            "en",
+            processors="tokenize,pos,constituency",
+            use_gpu=False,
+            download_method=None,
+        )
 
 # ----------------------------------------------------------------------------------------
 # Helper Functions
@@ -42,6 +54,7 @@ def create_parented_tree(complete_sent):
     if len(text) > MAX_PARSE_CHARS or len(text.split()) > MAX_PARSE_TOKENS:
         return None
 
+    _init_stanza()
     try:
         doc = stanza_parser(text)
         if not doc.sentences:
@@ -209,14 +222,12 @@ def extract_t_units(complete_sent, ptree=None):
     return filtered_t_units
 
 def count_clauses(complete_sent, ptree=None, t_unit_count=None):
-    '''Helper function to count the number of clauses in a complete sentence.'''
+    '''Helper function to count the number of clauses in a complete sentence.
+    Assumes complete_sent has already been validated by remove_fragments /
+    is_complete_sentence — the caller is responsible for that pre-filter.'''
 
     clause_count = 0
 
-    # only consider complete sentences
-    if not is_complete_sentence(complete_sent):
-        return 0
-    
     if t_unit_count is None:
         t_unit_count = count_t_units(complete_sent, ptree=ptree)
 
@@ -311,50 +322,84 @@ def mltu(complete_sentences):
 
     return np.mean(lengths)
 
-def compute_syntactic_vals(df):
-    '''Function to compute the syntactic metrics for each utterance in a dataframe.'''
+def _worker_process_text(text):
+    '''Top-level worker function — must be defined at module scope so that it
+    is picklable by multiprocessing.  Processes a single raw_text string and
+    returns a tuple (fragment_ratio, avg_t_units, clause_to_t_unit_ratio, mltu).
 
-    # compute values row-wise to avoid storing large nested sentence lists on the dataframe
-    num_utterances = len(df)
-    fragment_ratio_list = []
-    avg_t_units_list = []
-    clause_t_unit_ratio_list = []
-    mltu_list = []
+    stanza_parser must already be initialised in the calling process (the Pool
+    initializer _init_stanza handles this for worker processes).
+    '''
+    candidate_sentences = clean_tokens_syntactic(text)
+    complete_sentences = remove_fragments(candidate_sentences)
 
-    for text in tqdm(df["raw_text"], total=num_utterances, desc="Computing syntactic values"):
-        candidate_sentences = clean_tokens_syntactic(text)
-        complete_sentences = remove_fragments(candidate_sentences)
+    frag_r = (
+        fragment_ratio(candidate_sentences, complete_sentences)
+        if candidate_sentences
+        else np.nan
+    )
 
-        if not candidate_sentences:
-            fragment_ratio_list.append(np.nan)
-        else:
-            fragment_ratio_list.append(fragment_ratio(candidate_sentences, complete_sentences))
+    if not complete_sentences:
+        return frag_r, np.nan, np.nan, np.nan
 
-        if not complete_sentences:
-            avg_t_units_list.append(np.nan)
-            clause_t_unit_ratio_list.append(np.nan)
-            mltu_list.append(np.nan)
-            continue
+    total_t_units = 0
+    total_clauses = 0
+    t_unit_lengths = []
 
-        total_t_units = 0
-        total_clauses = 0
-        t_unit_lengths = []
+    for sent in complete_sentences:
+        t_count, clause_count, t_units = compute_sentence_stats(sent)
+        total_t_units += t_count
+        total_clauses += clause_count
+        for unit in t_units:
+            t_unit_lengths.append(t_unit_length(unit))
 
-        for sent in complete_sentences:
-            t_count, clause_count, t_units = compute_sentence_stats(sent)
-            total_t_units += t_count
-            total_clauses += clause_count
+    avg_t = total_t_units / len(complete_sentences)
+    c_t_r = total_clauses / total_t_units if total_t_units else np.nan
+    mltu_val = float(np.mean(t_unit_lengths)) if t_unit_lengths else np.nan
 
-            for unit in t_units:
-                t_unit_lengths.append(t_unit_length(unit))
+    return frag_r, avg_t, c_t_r, mltu_val
 
-        avg_t_units_list.append(total_t_units / len(complete_sentences))
-        clause_t_unit_ratio_list.append(total_clauses / total_t_units if total_t_units else np.nan)
-        mltu_list.append(np.mean(t_unit_lengths) if t_unit_lengths else np.nan)
 
-    df["fragment_ratio"] = fragment_ratio_list
-    df["avg_t_units"] = avg_t_units_list
-    df["clause_to_t_unit_ratio"] = clause_t_unit_ratio_list
-    df["mltu"] = mltu_list
+def compute_syntactic_vals(df, n_workers=1):
+    '''Compute syntactic metrics for each utterance in a dataframe.
+
+    Parameters
+    ----------
+    df        : DataFrame with a "raw_text" column.
+    n_workers : Number of parallel worker processes.  Defaults to 1
+                (single-threaded).  Set to the number of CPUs allocated in
+                your SLURM script to enable concurrent Stanza parsing.
+    '''
+    texts = df["raw_text"].tolist()
+    num_utterances = len(texts)
+
+    if n_workers > 1:
+        # Fork before any Stanza model is loaded in the parent, then let each
+        # worker initialise its own pipeline via the pool initializer.
+        ctx = multiprocessing.get_context("fork")
+        with ctx.Pool(processes=n_workers, initializer=_init_stanza) as pool:
+            results = list(
+                tqdm(
+                    pool.imap(_worker_process_text, texts, chunksize=10),
+                    total=num_utterances,
+                    desc="Computing syntactic values",
+                )
+            )
+    else:
+        _init_stanza()
+        results = [
+            _worker_process_text(text)
+            for text in tqdm(texts, total=num_utterances, desc="Computing syntactic values")
+        ]
+
+    if results:
+        frag_ratios, avg_t_units, c_t_ratios, mltus = zip(*results)
+    else:
+        frag_ratios, avg_t_units, c_t_ratios, mltus = [], [], [], []
+
+    df["fragment_ratio"] = list(frag_ratios)
+    df["avg_t_units"] = list(avg_t_units)
+    df["clause_to_t_unit_ratio"] = list(c_t_ratios)
+    df["mltu"] = list(mltus)
 
     return df

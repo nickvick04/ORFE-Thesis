@@ -6,25 +6,31 @@
 import os
 import gc
 import pandas as pd
-from data_preprocessing import corpus_longest_posts_batches, corpus_longest_posts_batches_from_jsonl
+from data_preprocessing import corpus_longest_posts_batches_from_jsonl
 from lexical_analysis_functions import compute_lexical_vals
 from visualization import *
 
 BATCH_SIZE = 1000
 
-def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE, num_shards=1, shard_index=0):
+def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE, num_shards=1, shard_index=0, n_workers=1):
     '''Runs full preprocessing and analysis pipeline on a single Convokit
-    corpus and writes a CSV to the corpus' parent Variation folder in batches
-    so as to reduce the memory capacity demanded of the cluster.'''
+    corpus and writes a CSV to the corpus parent Variation folder in batches.
 
-    # extract corpus
+    Uses the JSONL streaming path (corpus_longest_posts_batches_from_jsonl)
+    to avoid loading the entire Convokit Corpus object into memory.
+
+    Parameters
+    ----------
+    corpus_dir  : Path to the corpus folder (must contain utterances.jsonl).
+    batch_size  : Rows per batch (lower = less RAM per batch, more I/O).
+    num_shards  : Total number of parallel shard jobs (for SLURM arrays).
+    shard_index : Zero-based index of this job's shard.
+    n_workers   : Worker processes for parallel Stanza parsing.
+                  Should match --cpus-per-task in the SLURM script.
+    '''
+
     corpus_name = os.path.basename(corpus_dir)
     print(f"Processing corpus: {corpus_name}")
-
-    if num_shards < 1:
-        raise ValueError("num_shards must be >= 1")
-    if shard_index < 0 or shard_index >= num_shards:
-        raise ValueError("shard_index must satisfy 0 <= shard_index < num_shards")
 
     # get path to csv next to corpus
     output_dir = os.path.dirname(corpus_dir)
@@ -34,38 +40,31 @@ def run_full_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE, num_
         output_name = f"{corpus_name}_df_shard-{shard_index:03d}-of-{num_shards:03d}.csv"
     output_path = os.path.join(output_dir, output_name)
 
-    # load corpus
-    print(f"Loading corpus: {corpus_name}")
-    from convokit import Corpus
-    corpus = Corpus(corpus_dir)
-
     # boolean and index to track
     first_batch = True
     i = 0
-    print(f"Processing {corpus_name} in batches...")
-    print(f"Shard {shard_index + 1}/{num_shards}")
+    print(f"Processing {corpus_name} in batches (JSONL streaming)...")
+    print(f"Shard {shard_index + 1}/{num_shards}  |  workers: {n_workers}")
     print(f"Currently processing batch: {i}")
 
-    # iterate through globally filtered longest-post rows in batches
     from syntactic_analysis_functions import compute_syntactic_vals
-    for df_batch in corpus_longest_posts_batches(
-        corpus,
+    for df_batch in corpus_longest_posts_batches_from_jsonl(
+        corpus_dir,
         batch_size=batch_size,
         num_shards=num_shards,
         shard_index=shard_index,
     ):
-
-        print(f"Analyzing corpus batch: {corpus_name}")
+        print(f"Analyzing corpus batch {i}: {corpus_name}")
         df_batch = compute_lexical_vals(df_batch)
-        df_batch = compute_syntactic_vals(df_batch)
+        df_batch = compute_syntactic_vals(df_batch, n_workers=n_workers)
 
         # write to new file if first batch, o/w append to existing file
         df_batch.to_csv(output_path, mode="w" if first_batch else "a", header=first_batch, index=False)
 
-        # udpate boolean and index
+        # update boolean and index
         first_batch = False
         i += 1
-        # delete explicitly to save storage
+        # delete explicitly to free memory before next batch
         del df_batch
         gc.collect()
 
