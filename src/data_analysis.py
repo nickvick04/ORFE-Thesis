@@ -5,11 +5,14 @@
 
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
+import warnings
 
 import pymannkendall as mk
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+from statsmodels.tsa.stattools import adfuller, kpss, acf
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LinearRegression
@@ -445,3 +448,321 @@ def run_mann_kendall_tests(
     result_df["p_value"] = result_df["p_value"].round(6)
 
     return result_df
+
+
+# ----------------------------------------------------------------------------------------
+# Temporal Stationarity Tests (ADF / KPSS)
+# ----------------------------------------------------------------------------------------
+
+# Corpus-level metrics produced by lexical_temporal.csv.
+TEMPORAL_METRICS = [
+    "mattr_score",
+    "mtld_score",
+    "yules_k",
+    "zipf_score",
+    "aoa_score",
+    "nawl_ratio",
+]
+
+# Human-readable labels reused across stationarity and ACF outputs.
+TEMPORAL_METRIC_LABELS = {
+    "mattr_score": "MATTR",
+    "mtld_score":  "MTLD",
+    "yules_k":     "Yule's K",
+    "zipf_score":  "Zipf Score",
+    "aoa_score":   "Age of Acquisition",
+    "nawl_ratio":  "NAWL Ratio",
+}
+
+
+def _load_temporal_df(source: "str | Path | pd.DataFrame") -> pd.DataFrame:
+    """Return a DataFrame from a file path or pass through an existing DataFrame."""
+    if isinstance(source, (str, Path)):
+        return pd.read_csv(source)
+    return source.copy()
+
+
+def _extract_series(
+    df: pd.DataFrame,
+    subreddit: str,
+    metric: str,
+    subreddit_col: str,
+    time_col: str,
+) -> pd.Series:
+    """Extract a sorted, NaN-free time series for one (subreddit, metric) pair.
+
+    year_month strings (e.g. '2015-03') are parsed into a DatetimeIndex so
+    the series is properly ordered even if the CSV is not sorted.
+    """
+    sub = df[df[subreddit_col] == subreddit].copy()
+    sub[time_col] = pd.to_datetime(
+        sub[time_col].astype(str), format="%Y-%m", errors="coerce"
+    )
+    sub = sub.dropna(subset=[time_col, metric]).sort_values(time_col)
+    return sub.set_index(time_col)[metric].dropna()
+
+
+def run_stationarity_tests(
+    source: "str | Path | pd.DataFrame",
+    metrics: Optional[Sequence[str]] = None,
+    subreddit_col: str = "subreddit",
+    time_col: str = "year_month",
+    alpha: float = 0.05,
+    adf_maxlag: int = 4,
+) -> pd.DataFrame:
+    """Run ADF and KPSS unit-root tests on each (subreddit, metric) time series
+    in lexical_temporal.csv.
+
+    ADF null hypothesis: a unit root is present (non-stationary).
+    A small p-value rejects the null — evidence of stationarity.
+
+    KPSS null hypothesis: the series is stationary.
+    A small p-value rejects the null — evidence of a unit root.
+
+    Using both tests together guards against the known weaknesses of each:
+    ADF has low power against near-unit-root processes; KPSS over-rejects in
+    the presence of structural breaks.  The combined conclusion classifies each
+    series into one of four states:
+
+        stationary            – ADF rejects unit root AND KPSS does not reject stationarity
+        unit root             – ADF does not reject unit root AND KPSS rejects stationarity
+        inconclusive (both)   – both tests reject (possible fractional integration)
+        inconclusive (neither)– neither test rejects (insufficient power / short series)
+
+    Parameters
+    ----------
+    source : str, Path, or pd.DataFrame
+        Path to lexical_temporal.csv or an already-loaded DataFrame.
+    metrics : sequence of str, optional
+        Metric columns to test.  Defaults to TEMPORAL_METRICS.
+    subreddit_col : str
+        Column identifying the community (default 'subreddit').
+    time_col : str
+        Column containing year-month strings (default 'year_month').
+    alpha : float
+        Significance level for both tests (default 0.05).
+    adf_maxlag : int
+        Maximum lag order passed to adfuller; lag selected by AIC within this
+        bound (default 4).
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (subreddit, metric) with columns:
+          subreddit        – community label
+          metric           – metric name
+          n_obs            – number of monthly observations
+          adf_stat         – ADF test statistic
+          adf_p            – ADF p-value
+          adf_lags         – lag order chosen by AIC
+          adf_stationary   – True if adf_p < alpha
+          kpss_stat        – KPSS test statistic
+          kpss_p           – KPSS p-value (may be boundary-clipped by statsmodels)
+          kpss_stationary  – True if kpss_p > alpha
+          conclusion       – one of the four classification strings above
+    """
+    if metrics is None:
+        metrics = TEMPORAL_METRICS
+
+    df = _load_temporal_df(source)
+
+    missing = [m for m in metrics if m not in df.columns]
+    if missing:
+        raise ValueError(f"Missing metric columns: {missing}")
+    if subreddit_col not in df.columns:
+        raise ValueError(f"Missing subreddit column: '{subreddit_col}'")
+
+    subreddits = sorted(df[subreddit_col].dropna().unique())
+    records = []
+
+    for subreddit in subreddits:
+        for metric in metrics:
+            series = _extract_series(df, subreddit, metric, subreddit_col, time_col)
+            n = len(series)
+
+            if n < 10:
+                records.append(dict(
+                    subreddit=subreddit, metric=metric, n_obs=n,
+                    adf_stat=np.nan, adf_p=np.nan, adf_lags=np.nan,
+                    adf_stationary=np.nan,
+                    kpss_stat=np.nan, kpss_p=np.nan,
+                    kpss_stationary=np.nan,
+                    conclusion="insufficient data",
+                ))
+                continue
+
+            # --- ADF test ---
+            adf_out = adfuller(series.values, maxlag=adf_maxlag, autolag="AIC")
+            adf_stat  = float(adf_out[0])
+            adf_p     = float(adf_out[1])
+            adf_lags  = int(adf_out[2])
+            adf_stat_flag = adf_p < alpha
+
+            # --- KPSS test (suppress interpolation boundary warnings) ---
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                kpss_out = kpss(series.values, regression="c", nlags="auto")
+            kpss_stat      = float(kpss_out[0])
+            kpss_p         = float(kpss_out[1])
+            kpss_stat_flag = kpss_p > alpha  # fail to reject → stationary
+
+            # --- Combined conclusion ---
+            if adf_stat_flag and kpss_stat_flag:
+                conclusion = "stationary"
+            elif not adf_stat_flag and not kpss_stat_flag:
+                conclusion = "unit root"
+            elif adf_stat_flag and not kpss_stat_flag:
+                conclusion = "inconclusive (both reject)"
+            else:
+                conclusion = "inconclusive (neither rejects)"
+
+            records.append(dict(
+                subreddit=subreddit,
+                metric=metric,
+                n_obs=n,
+                adf_stat=round(adf_stat, 4),
+                adf_p=round(adf_p, 6),
+                adf_lags=adf_lags,
+                adf_stationary=adf_stat_flag,
+                kpss_stat=round(kpss_stat, 4),
+                kpss_p=round(kpss_p, 6),
+                kpss_stationary=kpss_stat_flag,
+                conclusion=conclusion,
+            ))
+
+    return pd.DataFrame(records)
+
+
+# ----------------------------------------------------------------------------------------
+# ACF Plots
+# ----------------------------------------------------------------------------------------
+
+def plot_acf_grid(
+    source: "str | Path | pd.DataFrame",
+    metrics: Optional[Sequence[str]] = None,
+    subreddit_col: str = "subreddit",
+    time_col: str = "year_month",
+    n_lags: int = 12,
+    alpha: float = 0.05,
+    save_path: Optional["str | Path"] = None,
+) -> None:
+    """Plot a grid of ACF (autocorrelation function) charts for each
+    (metric, subreddit) pair in lexical_temporal.csv.
+
+    Layout: one row per metric, one column per subreddit.  Each panel shows
+    autocorrelation at lags 1 through n_lags with a ±1.96/√T significance band.
+    Bars that exceed the band are highlighted in red to draw attention to
+    lags with statistically significant autocorrelation.
+
+    A high ACF(1) — and slowly decaying bars across many lags — is the visual
+    signature of a near-unit-root process and signals that OLS trend estimates
+    will require HAC standard errors or first-differencing before inference.
+
+    Parameters
+    ----------
+    source : str, Path, or pd.DataFrame
+        Path to lexical_temporal.csv or an already-loaded DataFrame.
+    metrics : sequence of str, optional
+        Metrics to include.  Defaults to TEMPORAL_METRICS.
+    subreddit_col : str
+        Column identifying the community (default 'subreddit').
+    time_col : str
+        Column containing year-month strings (default 'year_month').
+    n_lags : int
+        Number of lags to display on each ACF plot (default 12).
+    alpha : float
+        Significance level for the confidence band (default 0.05).
+        Band is drawn at ±z * 1/√T where z = scipy.stats.norm.ppf(1 - alpha/2).
+    save_path : str or Path, optional
+        If provided, save the figure to this path instead of displaying it.
+    """
+    if metrics is None:
+        metrics = TEMPORAL_METRICS
+
+    df = _load_temporal_df(source)
+
+    missing = [m for m in metrics if m not in df.columns]
+    if missing:
+        raise ValueError(f"Missing metric columns: {missing}")
+
+    subreddits = sorted(df[subreddit_col].dropna().unique())
+    n_rows = len(metrics)
+    n_cols = len(subreddits)
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(5 * n_cols, 3.2 * n_rows),
+        sharey=False,
+        squeeze=False,
+    )
+
+    # colour palette: one colour per subreddit column
+    col_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    for row, metric in enumerate(metrics):
+        for col, subreddit in enumerate(subreddits):
+            ax = axes[row][col]
+            series = _extract_series(df, subreddit, metric, subreddit_col, time_col)
+            T = len(series)
+
+            if T < n_lags + 2:
+                ax.set_title(f"{subreddit}\n(insufficient data)", fontsize=9)
+                ax.axis("off")
+                continue
+
+            acf_vals, confint = acf(series.values, nlags=n_lags, alpha=alpha, fft=True)
+            lags       = np.arange(1, n_lags + 1)
+            acf_plot   = acf_vals[1:]
+            ci_low     = confint[1:, 0] - acf_vals[1:]
+            ci_high    = confint[1:, 1] - acf_vals[1:]
+            sig_band   = 1.96 / np.sqrt(T)
+            sig_mask   = np.abs(acf_plot) > sig_band
+
+            bar_colors = [
+                col_colors[col % len(col_colors)] if not s else "#DC2626"
+                for s in sig_mask
+            ]
+
+            ax.bar(lags, acf_plot, color=bar_colors, alpha=0.75, width=0.5)
+            ax.fill_between(lags, ci_low, ci_high, alpha=0.15, color="grey")
+            ax.axhline(0,          color="black", linewidth=0.8)
+            ax.axhline( sig_band,  color="grey",  linewidth=1.0, linestyle="--")
+            ax.axhline(-sig_band,  color="grey",  linewidth=1.0, linestyle="--")
+            ax.set_xlim(0.25, n_lags + 0.75)
+            ax.set_xticks(lags)
+            ax.grid(True, axis="y", alpha=0.3)
+
+            # first row: subreddit name as column header
+            if row == 0:
+                label = subreddit.replace("subreddit-", "r/")
+                ax.set_title(label, fontsize=11, fontweight="bold")
+
+            # first column: metric name as row label
+            if col == 0:
+                ax.set_ylabel(
+                    TEMPORAL_METRIC_LABELS.get(metric, metric), fontsize=10
+                )
+
+            # annotate ACF(1) value
+            ax.text(
+                0.97, 0.92, f"ACF(1)={acf_vals[1]:.2f}",
+                transform=ax.transAxes, ha="right", va="top", fontsize=8,
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8),
+            )
+
+    for row in range(n_rows):
+        for col in range(n_cols):
+            axes[row][col].set_xlabel("Lag (months)", fontsize=8)
+
+    fig.suptitle(
+        "ACF of Monthly Corpus-Level Lexical Metrics by Community\n"
+        "(red bars exceed ±1.96/√T significance threshold)",
+        fontsize=13, fontweight="bold",
+    )
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+
+    if save_path is not None:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"ACF grid saved to: {save_path}")
+    else:
+        plt.show()
