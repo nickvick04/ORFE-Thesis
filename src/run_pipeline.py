@@ -97,7 +97,7 @@ def run_lexical_pipeline_cnvkt_batches(corpus_dir: str, batch_size=BATCH_SIZE):
         del df_batch
         gc.collect()
 
-def run_temporal_pipeline(input_path: str, output_path: str):
+def run_temporal_pipeline(input_path: str, output_path: str, n_workers: int = 1):
     '''Reads the combined utterance-level lexical_master.csv, aggregates all utterances
     to (subreddit, year_month) monthly corpora, computes corpus-level lexical metrics,
     and writes the resulting panel to output_path as a single CSV.
@@ -117,6 +117,8 @@ def run_temporal_pipeline(input_path: str, output_path: str):
     ----------
     input_path  : str  Path to lexical_master.csv.
     output_path : str  Destination path for the output CSV (e.g. lexical_temporal.csv).
+    n_workers   : int  Worker processes for parallel tokenization (default 1).
+                       Should match --cpus-per-task in the SLURM script.
     '''
 
     from temporal import aggregate_temporal_metrics, NEEDED_COLS
@@ -125,7 +127,7 @@ def run_temporal_pipeline(input_path: str, output_path: str):
     df = pd.read_csv(input_path, usecols=NEEDED_COLS, low_memory=False)
     print(f"Loaded {len(df):,} utterances across {df['subreddit'].nunique()} subreddits.")
 
-    temporal_df = aggregate_temporal_metrics(df)
+    temporal_df = aggregate_temporal_metrics(df, n_workers=n_workers)
 
     print(f"\nWriting temporal panel to: {output_path}")
     temporal_df.to_csv(output_path, index=False)

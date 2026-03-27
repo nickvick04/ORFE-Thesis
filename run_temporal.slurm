@@ -2,9 +2,9 @@
 #SBATCH --job-name=lexical-temporal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=64G
-#SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=8
+#SBATCH --mem-per-cpu=16G
+#SBATCH --time=08:00:00
 #SBATCH --mail-type=begin,end,fail
 #SBATCH --mail-user=nv9344@princeton.edu
 #SBATCH --output=/scratch/network/nv9344/Thesis/logs/%x_%j.out
@@ -26,4 +26,5 @@ echo "Output: ${OUTPUT}"
 
 python -u run_temporal.py \
   --input  "${INPUT}"    \
-  --output "${OUTPUT}"
+  --output "${OUTPUT}"   \
+  --cpus   "${SLURM_CPUS_PER_TASK}"

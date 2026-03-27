@@ -41,6 +41,14 @@ def main():
         help="Override the Convokit root directory (adjusts default --input and --output paths)",
     )
 
+    parser.add_argument(
+        "--cpus",
+        type=int,
+        default=1,
+        help="Number of worker processes for parallel tokenization (default 1). "
+             "Set to match --cpus-per-task in your SLURM script.",
+    )
+
     args = parser.parse_args()
 
     # if a custom convokit_root is given but input/output were left at defaults, re-derive them
@@ -58,6 +66,7 @@ def main():
     run_temporal_pipeline(
         input_path=args.input,
         output_path=args.output,
+        n_workers=args.cpus,
     )
 
 
