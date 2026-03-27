@@ -23,7 +23,7 @@ from sklearn.preprocessing import OneHotEncoder
 
 LEXICAL_METRICS = [
     "mtld_score",
-    # "mattr_score",  # uncomment once pipeline has been re-run with MATTR
+    "mattr_score",
     "yules_k",
     "zipf_score",
     "aoa_score",
