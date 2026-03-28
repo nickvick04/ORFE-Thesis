@@ -11,3 +11,4 @@ nltk
 stanza
 convokit
 pymannkendall
+ipykernel
