@@ -100,8 +100,8 @@ def aoa_score(clean_tokens, aoa_dict=aoa_dict):
 
     return aoa_score
 
-# import NAWL list of academic words
-nawl_list = pd.read_csv("../Data/nawl_cleaned.csv")
+# import NAWL list of academic words as a set for O(1) membership lookup
+nawl_list = set(pd.read_csv("../Data/nawl_cleaned.csv")["word"].str.lower())
 
 def nawl_ratio(clean_tokens, nawl_list=nawl_list):
     '''Returns the ratio of words present in the NAWL given a set of cleaned, lemmatized tokens.
