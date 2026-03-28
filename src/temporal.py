@@ -117,6 +117,24 @@ def compute_corpus_metrics(group_df):
     }
 
 # ----------------------------------------------------------------------------------------
+# Worker wrapper for parallel group processing
+# ----------------------------------------------------------------------------------------
+def _compute_group_metrics(args):
+    '''Worker function for parallelising compute_corpus_metrics across (subreddit, year_month)
+    groups. Accepts a tuple (subreddit, year_month, source_variation, group_df) and returns
+    the complete output row dict. Must be a module-level function to be picklable by
+    multiprocessing.Pool on Linux (fork) and macOS/Windows (spawn).'''
+
+    subreddit, year_month, source_variation, group_df = args
+    metrics = compute_corpus_metrics(group_df)
+    return {
+        "subreddit":        subreddit,
+        "year_month":       str(year_month),
+        "source_variation": source_variation,
+        **metrics,
+    }
+
+# ----------------------------------------------------------------------------------------
 # Main Aggregation Function
 # ----------------------------------------------------------------------------------------
 def aggregate_temporal_metrics(df, n_workers=1):
@@ -129,10 +147,10 @@ def aggregate_temporal_metrics(df, n_workers=1):
     the output panel is unaffected by month-to-month variation in posting volume or
     post-length distributions.
 
-    All utterances are tokenized before the groupby loop. When n_workers > 1, tokenization
-    is parallelised across workers using multiprocessing.Pool. On Linux (Adroit), forked
-    workers inherit the parent's loaded NLTK models so there is no per-worker startup cost.
-    With n_workers=8 this reduces wall time by approximately 6-7x versus single-threaded.
+    All utterances are tokenized before the groupby loop, and corpus metric computation
+    is also parallelised across groups when n_workers > 1. Both phases use
+    multiprocessing.Pool. On Linux (Adroit), forked workers inherit the parent's loaded
+    NLTK models so there is no per-worker startup cost.
 
     Parameters
     ----------
@@ -169,26 +187,25 @@ def aggregate_temporal_metrics(df, n_workers=1):
         token_lists = [_tokenize_utterance(t) for t in texts]
     df["_tokens"] = token_lists
 
-    groups   = df.groupby(["subreddit", "year_month"], sort=True)
-    n_groups = len(groups)
-    print(f"Aggregating {len(df):,} utterances into {n_groups} (subreddit, year_month) cells...")
+    groups = df.groupby(["subreddit", "year_month"], sort=True)
+    group_args = [
+        (subreddit, year_month, group_df["source_variation"].iloc[0], group_df)
+        for (subreddit, year_month), group_df in groups
+    ]
+    n_groups = len(group_args)
+    print(f"Aggregating {len(df):,} utterances into {n_groups} (subreddit, year_month) cells "
+          f"across {n_workers} worker(s)...")
 
-    rows = []
-    for i, ((subreddit, year_month), group_df) in enumerate(groups):
-        if (i + 1) % 10 == 0 or i == 0:
-            print(f"  Processing group {i + 1}/{n_groups}: {subreddit} | {year_month}")
-
-        metrics = compute_corpus_metrics(group_df)
-
-        rows.append({
-            "subreddit":        subreddit,
-            "year_month":       str(year_month),
-            "source_variation": group_df["source_variation"].iloc[0],
-            **metrics,
-        })
-
-        del group_df
-        gc.collect()
+    if n_workers > 1:
+        chunksize = max(1, n_groups // (n_workers * 4))
+        with Pool(n_workers) as pool:
+            rows = list(pool.map(_compute_group_metrics, group_args, chunksize=chunksize))
+    else:
+        rows = []
+        for i, args in enumerate(group_args):
+            if (i + 1) % 10 == 0 or i == 0:
+                print(f"  Processing group {i + 1}/{n_groups}: {args[0]} | {args[1]}")
+            rows.append(_compute_group_metrics(args))
 
     print(f"Aggregation complete: {len(rows)} monthly corpus rows produced.")
     return pd.DataFrame(rows)
