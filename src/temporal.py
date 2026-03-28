@@ -121,12 +121,24 @@ def compute_corpus_metrics(group_df):
 # ----------------------------------------------------------------------------------------
 def _compute_group_metrics(args):
     '''Worker function for parallelising compute_corpus_metrics across (subreddit, year_month)
-    groups. Accepts a tuple (subreddit, year_month, source_variation, group_df) and returns
-    the complete output row dict. Must be a module-level function to be picklable by
-    multiprocessing.Pool on Linux (fork) and macOS/Windows (spawn).'''
+    groups. Accepts a tuple of plain Python data extracted from the group DataFrame so that
+    the full df is not held in worker memory via pickle. Reconstructs a minimal DataFrame
+    inside the worker to reuse compute_corpus_metrics unchanged.
 
-    subreddit, year_month, source_variation, group_df = args
-    metrics = compute_corpus_metrics(group_df)
+    Must be a module-level function to be picklable by multiprocessing.Pool.'''
+
+    subreddit, year_month, source_variation, tokens, speaker_ids, zipf_scores, aoa_scores = args
+
+    # Reconstruct a minimal DataFrame from plain Python lists — avoids carrying references
+    # to the parent df's numpy backing arrays through the pickle/fork boundary.
+    mini_df = pd.DataFrame({
+        "_tokens":    tokens,
+        "speaker_id": speaker_ids,
+        "zipf_score": zipf_scores,
+        "aoa_score":  aoa_scores,
+    })
+
+    metrics = compute_corpus_metrics(mini_df)
     return {
         "subreddit":        subreddit,
         "year_month":       str(year_month),
@@ -187,14 +199,32 @@ def aggregate_temporal_metrics(df, n_workers=1):
         token_lists = [_tokenize_utterance(t) for t in texts]
     df["_tokens"] = token_lists
 
+    # Extract only the four columns each worker needs as plain Python lists.
+    # This severs the reference from group_df slices to df's numpy backing arrays,
+    # so deleting df below actually frees the bulk of memory before workers are forked.
     groups = df.groupby(["subreddit", "year_month"], sort=True)
     group_args = [
-        (subreddit, year_month, group_df["source_variation"].iloc[0], group_df)
+        (
+            subreddit,
+            year_month,
+            group_df["source_variation"].iloc[0],
+            group_df["_tokens"].tolist(),
+            group_df["speaker_id"].tolist(),
+            group_df["zipf_score"].tolist(),
+            group_df["aoa_score"].tolist(),
+        )
         for (subreddit, year_month), group_df in groups
     ]
     n_groups = len(group_args)
-    print(f"Aggregating {len(df):,} utterances into {n_groups} (subreddit, year_month) cells "
-          f"across {n_workers} worker(s)...")
+
+    # Free the full df (and _tokens column) before forking workers.
+    # Without this, each forked worker inherits the parent's ~100GB address space
+    # and COW pages are duplicated as workers allocate their own corpus_tokens lists.
+    del df, groups
+    gc.collect()
+
+    print(f"Aggregating across {n_groups} (subreddit, year_month) cells "
+          f"using {n_workers} worker(s)...")
 
     if n_workers > 1:
         chunksize = max(1, n_groups // (n_workers * 4))
