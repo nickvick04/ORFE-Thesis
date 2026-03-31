@@ -30,6 +30,9 @@ METRIC_LABELS = {
     'nawl_ratio':  'NAWL Ratio',
 }
 
+# metrics that are negated before plotting so that higher always means greater lexical quality
+NEGATED_METRICS = {'yules_k', 'zipf_score'}
+
 
 # -----------------------------------------------------------------------------------------
 # Private helpers
@@ -365,6 +368,7 @@ def plot_quality_over_relative_time(
 
     for i, col in enumerate(metrics):
         ax = axes[i]
+        negate = col in NEGATED_METRICS
         for j, quartile in enumerate(quartile_order):
             mask = plot_df['freq_quartile'].astype(str) == quartile
             grouped = (
@@ -376,6 +380,9 @@ def plot_quality_over_relative_time(
             grouped = grouped[grouped['count'] >= min_speakers_per_point]
             if grouped.empty:
                 continue
+
+            if negate:
+                grouped['mean'] = -grouped['mean']
 
             color = palette[j % len(palette)]
             ax.plot(
@@ -391,7 +398,10 @@ def plot_quality_over_relative_time(
                     color=color, alpha=0.15, linewidth=0,
                 )
 
-        ax.set_ylabel(METRIC_LABELS.get(col, col))
+        ylabel = METRIC_LABELS.get(col, col)
+        if negate:
+            ylabel = f'−{ylabel}'
+        ax.set_ylabel(ylabel)
         ax.grid(True, alpha=0.3)
         ax.legend(title='Freq. Quartile', ncol=2, fontsize=9)
 
