@@ -7,10 +7,11 @@ from itertools import combinations
 from typing import Optional, Sequence
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from scipy.stats import kruskal, mannwhitneyu
+from scipy.stats import kruskal, mannwhitneyu, skew, kurtosis
 
 
 LEXICAL_METRICS = [
@@ -79,14 +80,46 @@ def assign_freq_quartiles(
     df: pd.DataFrame,
     freq_col: str = 'num_utterances_by_speaker',
     n_quartiles: int = 4,
+    method: str = 'threshold',
+    threshold_cuts: Optional[Sequence[float]] = None,
 ) -> pd.DataFrame:
-    """Assign each speaker to a posting-frequency quartile.
+    """Assign each speaker to a posting-frequency tier.
 
-    Quartile boundaries are computed on the **speaker-level** distribution of
-    `freq_col` (one value per unique speaker_id).  Because lexical_master.csv
-    contains one row per user per month, computing quantiles on the raw
-    row-level column would shift the boundaries upward by giving prolific users
-    more influence.  This function deduplicates first to avoid that.
+    Two binning methods are available.  The default, ``'threshold'``, uses
+    fixed cut points motivated by the empirical percentile structure of
+    lexical_master.csv, where the distribution is so right-skewed (skewness
+    ≈ 114, P25 = P50 = 1) that equal-frequency quantile bins collapse — the
+    standard ``pd.qcut`` with n=4 yields only 3 bins on the full corpus because
+    the lower boundary edges are duplicates.
+
+    **method='threshold'** (recommended)
+        Fixed cuts at the percentile landmarks P75 (4 posts) and P95 (25 posts),
+        plus a hard boundary for the one-time-poster spike at n=1:
+
+        ============  =============  =============  ==========================
+        Tier          Range          Percentile     Interpretation
+        ============  =============  =============  ==========================
+        T1 (1)        n = 1          P0 – P46       One-time posters (visited
+                                                    once and did not return)
+        T2 (2–4)      2 ≤ n ≤ 4      P46 – P75      Casual / occasional
+        T3 (5–25)     5 ≤ n ≤ 25     P75 – P95      Active contributors
+        T4 (26+)      n ≥ 26         P95 – P100     Power users
+        ============  =============  =============  ==========================
+
+        The cut points are roughly one order of magnitude apart on a log scale,
+        keeping the tiers interpretable and the upper two groups meaningfully
+        separated from the one-time-poster mass.  Custom cuts can be supplied
+        via ``threshold_cuts``.
+
+    **method='quantile'**
+        Equal-frequency bins via ``pd.qcut``.  Due to the heavy spike at n=1,
+        this will produce fewer than ``n_quartiles`` bins on the full corpus
+        (3 instead of 4).  Suitable for subsets where the distribution is less
+        degenerate (e.g., the temporal panel after applying the min_obs filter).
+
+    All binning is computed on the **speaker-level** distribution (one value per
+    unique speaker_id) to avoid prolific users with many monthly rows inflating
+    the upper quantile boundaries.
 
     Parameters
     ----------
@@ -96,20 +129,28 @@ def assign_freq_quartiles(
         Column used for frequency binning.  Default is
         'num_utterances_by_speaker' (lifetime total posts across the corpus).
     n_quartiles : int
-        Number of equal-frequency bins.  Default is 4.  Pass 5 for quintiles,
-        10 for deciles, etc.
+        Number of equal-frequency bins.  Only used when ``method='quantile'``.
+        Default is 4.
+    method : {'threshold', 'quantile'}
+        Binning strategy.  Default is ``'threshold'``.
+    threshold_cuts : sequence of float, optional
+        Custom bin edges for ``method='threshold'``.  Must be a strictly
+        increasing sequence starting at 0 and ending at ``np.inf``.  Default
+        is ``[0, 1, 4, 25, np.inf]``, which corresponds to the T1–T4 tiers
+        described above.
 
     Returns
     -------
     pd.DataFrame
-        Copy of `df` with 'freq_quartile' added.  Labels are ordered
-        Categorical values 'Q1' … 'Q{n}'; Q1 = least frequent posters,
-        Q{n} = most frequent.  Speakers with a NaN or zero `freq_col` value
-        receive NaN in 'freq_quartile'.
+        Copy of `df` with 'freq_quartile' added as an ordered Categorical.
+        Speakers with a NaN or zero `freq_col` value receive NaN.
     """
     _require_columns(df, ['speaker_id', freq_col])
 
-    # One row per speaker with a valid, positive frequency value.
+    if method not in ('threshold', 'quantile'):
+        raise ValueError(f"method must be 'threshold' or 'quantile', got {method!r}")
+
+    # Deduplicate to one row per speaker with a valid, positive count.
     speaker_freq = (
         df[['speaker_id', freq_col]]
         .drop_duplicates('speaker_id')
@@ -119,9 +160,40 @@ def assign_freq_quartiles(
     valid = speaker_freq[freq_col].notna() & (speaker_freq[freq_col] > 0)
     speaker_freq = speaker_freq[valid]
 
-    speaker_freq['freq_quartile'] = _qcut_with_labels(
-        speaker_freq[freq_col], n_quartiles
-    )
+    if method == 'threshold':
+        if threshold_cuts is None:
+            # Default cuts motivated by P75=4 and P95=25 of the full corpus.
+            cuts = [0, 1, 4, 25, np.inf]
+        else:
+            cuts = list(threshold_cuts)
+
+        # Build labels: for finite upper bounds show "lo–hi", for the last
+        # open-ended bin show "lo+".
+        # Bin 0 uses include_lowest=True with left edge 0, so actual values
+        # start at 1 (all speakers have > 0 posts by construction).
+        labels = []
+        for i in range(len(cuts) - 1):
+            lo = 1 if i == 0 else int(cuts[i]) + 1
+            hi = cuts[i + 1]
+            tier = f'T{i + 1}'
+            if np.isinf(hi):
+                labels.append(f'{tier} ({lo}+)')
+            elif lo == int(hi):
+                labels.append(f'{tier} ({lo})')
+            else:
+                labels.append(f'{tier} ({lo}\u2013{int(hi)})')
+
+        speaker_freq['freq_quartile'] = pd.cut(
+            speaker_freq[freq_col],
+            bins=cuts,
+            labels=labels,
+            include_lowest=True,
+        )
+
+    else:  # method == 'quantile'
+        speaker_freq['freq_quartile'] = _qcut_with_labels(
+            speaker_freq[freq_col], n_quartiles
+        )
 
     out = df.copy()
     out = out.merge(
@@ -170,10 +242,12 @@ def prepare_panel(
     freq_col: str = 'num_utterances_by_speaker',
     n_quartiles: int = 4,
     min_obs: int = 6,
+    method: str = 'threshold',
+    threshold_cuts: Optional[Sequence[float]] = None,
 ) -> pd.DataFrame:
     """Prepare a speaker-month panel for the temporal frequency analysis.
 
-    Convenience wrapper that (1) assigns posting-frequency quartiles via
+    Convenience wrapper that (1) assigns posting-frequency tiers via
     :func:`assign_freq_quartiles`, (2) adds a relative-month counter via
     :func:`add_relative_month`, and (3) filters to speakers with at least
     ``min_obs`` distinct monthly rows so every retained user has a trajectory
@@ -183,6 +257,10 @@ def prepare_panel(
     :func:`assign_freq_quartiles` directly instead — no temporal filter should
     be applied there, since all speakers should be included.
 
+    Note: within the filtered panel (min_obs ≥ 6), the one-time-poster tier
+    (T1) is empty by construction, so the temporal plot will naturally show
+    only the active tiers (T2–T4).
+
     Parameters
     ----------
     df : pd.DataFrame
@@ -191,10 +269,17 @@ def prepare_panel(
         Frequency column for quartile assignment.
         Default is 'num_utterances_by_speaker'.
     n_quartiles : int
-        Number of frequency bins (default 4).
+        Number of frequency bins; only used when ``method='quantile'``.
+        Default is 4.
     min_obs : int
         Minimum number of monthly rows a speaker must have to be retained.
         Default is 6 (roughly half a year of consistent activity).
+    method : {'threshold', 'quantile'}
+        Binning strategy passed to :func:`assign_freq_quartiles`.
+        Default is ``'threshold'``.
+    threshold_cuts : sequence of float, optional
+        Custom bin edges when ``method='threshold'``.  Passed through to
+        :func:`assign_freq_quartiles`.
 
     Returns
     -------
@@ -202,7 +287,13 @@ def prepare_panel(
         Filtered DataFrame with 'freq_quartile' and 'relative_month' added.
         A retention summary is printed to stdout.
     """
-    out = assign_freq_quartiles(df, freq_col=freq_col, n_quartiles=n_quartiles)
+    out = assign_freq_quartiles(
+        df,
+        freq_col=freq_col,
+        n_quartiles=n_quartiles,
+        method=method,
+        threshold_cuts=threshold_cuts,
+    )
     out = add_relative_month(out)
 
     # lexical_master has exactly one row per user-month, so row count = month count.
@@ -512,3 +603,178 @@ def run_freq_quartile_tests(
     result_df['p_value'] = result_df['p_value'].round(6)
 
     return result_df
+
+
+# -----------------------------------------------------------------------------------------
+# Frequency distribution diagnostics
+# -----------------------------------------------------------------------------------------
+
+def _extract_speaker_freq(
+    df: pd.DataFrame,
+    freq_col: str = 'num_utterances_by_speaker',
+) -> pd.Series:
+    """Return a Series of positive per-speaker post counts (one value per speaker)."""
+    _require_columns(df, ['speaker_id', freq_col])
+    s = (
+        df[['speaker_id', freq_col]]
+        .drop_duplicates('speaker_id')
+        [freq_col]
+        .pipe(pd.to_numeric, errors='coerce')
+        .dropna()
+    )
+    return s[s > 0].reset_index(drop=True)
+
+
+def summarize_freq_distribution(
+    df: pd.DataFrame,
+    freq_col: str = 'num_utterances_by_speaker',
+    low_count_thresholds: Sequence[int] = (1, 2, 3, 5, 10),
+) -> None:
+    """Print descriptive statistics for the speaker posting-frequency distribution.
+
+    Computes summary statistics and percentiles on the speaker-level post-count
+    distribution, and shows what fraction of speakers fall at or below each of
+    several low-count thresholds.  Useful for motivating bin-selection choices.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain 'speaker_id' and `freq_col`.
+    freq_col : str
+        Column holding per-speaker post counts.
+    low_count_thresholds : sequence of int
+        Post-count thresholds for the low-count breakdown table.
+    """
+    s = _extract_speaker_freq(df, freq_col)
+
+    percentiles = [1, 5, 10, 25, 50, 75, 90, 95, 99, 99.9]
+    pct_values = np.percentile(s, percentiles)
+
+    print("=== Speaker Post-Count Distribution ===")
+    print(f"  N speakers      : {len(s):>12,}")
+    print(f"  Mean            : {s.mean():>12.2f}")
+    print(f"  Median          : {s.median():>12.2f}")
+    print(f"  Std dev         : {s.std():>12.2f}")
+    print(f"  Skewness        : {skew(s):>12.2f}  (>1 = right-skewed)")
+    print(f"  Excess kurtosis : {kurtosis(s):>12.2f}")
+    print(f"  Min / Max       : {s.min():>6.0f} / {s.max():>,.0f}")
+    print()
+    print("=== Percentiles ===")
+    for p, v in zip(percentiles, pct_values):
+        print(f"  P{str(p):>5}  :  {v:>8.0f} posts")
+    print()
+    print("=== Low-Count Speaker Breakdown ===")
+    for t in low_count_thresholds:
+        frac = (s <= t).mean()
+        print(f"  <= {t:>2} post(s)  : {frac:.1%} of speakers")
+
+
+def plot_freq_distribution(
+    df: pd.DataFrame,
+    freq_col: str = 'num_utterances_by_speaker',
+) -> None:
+    """Plot a three-panel diagnostic of the speaker posting-frequency distribution.
+
+    Panels
+    ------
+    1. Linear-scale histogram capped at P99 (shows the spike at low counts).
+    2. Log₁₀-scale histogram with dashed lines at the P25 / P50 / P75 cut points.
+    3. Empirical CDF on a log₁₀ x-axis with the same quartile markers.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain 'speaker_id' and `freq_col`.
+    freq_col : str
+        Column holding per-speaker post counts.
+    """
+    s = _extract_speaker_freq(df, freq_col)
+    q_vals = np.percentile(s, [25, 50, 75])
+    colors = ['#e07b54', '#c0392b', '#8e44ad']
+    q_labels = ['P25', 'P50', 'P75']
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 4.5))
+
+    # Panel 1: linear-scale histogram capped at P99
+    ax = axes[0]
+    cap = np.percentile(s, 99)
+    ax.hist(s[s <= cap], bins=80, color='steelblue', edgecolor='none', alpha=0.85)
+    ax.set_xlabel('Posts per Speaker')
+    ax.set_ylabel('Number of Speakers')
+    ax.set_title('Distribution (capped at P99)')
+    ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{int(x):,}'))
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{int(x):,}'))
+
+    # Panel 2: log₁₀-scale histogram with quartile markers
+    ax = axes[1]
+    ax.hist(np.log10(s), bins=80, color='steelblue', edgecolor='none', alpha=0.85)
+    ax.set_xlabel('log₁₀(Posts per Speaker)')
+    ax.set_ylabel('Number of Speakers')
+    ax.set_title('Distribution (log₁₀ scale)')
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{int(x):,}'))
+    for qv, c, lbl in zip(q_vals, colors, q_labels):
+        ax.axvline(
+            np.log10(qv), color=c, linestyle='--', linewidth=1.4,
+            label=f'{lbl} = {qv:.0f} posts',
+        )
+    ax.legend(fontsize=8)
+
+    # Panel 3: empirical CDF
+    ax = axes[2]
+    sorted_s = np.sort(s)
+    cdf = np.arange(1, len(sorted_s) + 1) / len(sorted_s)
+    ax.plot(np.log10(sorted_s), cdf, color='steelblue', linewidth=1.5)
+    for qv, c, level in zip(q_vals, colors, [0.25, 0.50, 0.75]):
+        ax.axvline(np.log10(qv), color=c, linestyle='--', linewidth=1.2)
+        ax.axhline(level, color=c, linestyle=':', linewidth=1.0)
+    ax.set_xlabel('log₁₀(Posts per Speaker)')
+    ax.set_ylabel('Cumulative Fraction of Speakers')
+    ax.set_title('Empirical CDF')
+    ax.set_ylim(0, 1)
+
+    fig.suptitle('Speaker Posting Frequency: Skew Diagnostic', fontsize=15, y=1.02)
+    plt.tight_layout()
+    plt.show()
+
+
+def diagnose_quartile_bins(
+    df: pd.DataFrame,
+    freq_col: str = 'num_utterances_by_speaker',
+    n_quartiles: int = 4,
+) -> None:
+    """Print a diagnostic showing how many bins pd.qcut actually produces.
+
+    When the posting-frequency distribution has many tied low values,
+    ``pd.qcut(..., duplicates='drop')`` silently collapses duplicate bin
+    edges and produces fewer bins than requested.  This function makes that
+    visible by printing the actual bin edges and the speaker count in each bin.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain 'speaker_id' and `freq_col`.
+    freq_col : str
+        Column holding per-speaker post counts.
+    n_quartiles : int
+        Number of bins requested (default 4).
+    """
+    s = _extract_speaker_freq(df, freq_col)
+
+    _, raw_bins = pd.qcut(s, q=n_quartiles, retbins=True, duplicates='drop')
+    n_bins = len(raw_bins) - 1
+
+    print(f"Requested bins : {n_quartiles}")
+    print(f"Bins produced  : {n_bins}"
+          + ("  <-- duplicate edges dropped" if n_bins < n_quartiles else ""))
+    print(f"Bin edges      : {[int(b) for b in raw_bins]}")
+    print()
+
+    labels = [f'Q{i + 1}' for i in range(n_bins)]
+    assigned = pd.cut(s, bins=raw_bins, labels=labels, include_lowest=True)
+    counts = assigned.value_counts().sort_index()
+    for label, lo, hi in zip(labels, raw_bins[:-1], raw_bins[1:]):
+        n = counts.get(label, 0)
+        print(
+            f"  {label}: [{int(lo):>4}, {int(hi):>6}] posts"
+            f"  →  {n:>10,} speakers  ({100 * n / len(s):.1f}%)"
+        )
