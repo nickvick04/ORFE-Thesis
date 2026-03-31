@@ -6,7 +6,7 @@ import numpy as np
 
 # define the metrics
 LEXICAL_METRICS = [
-    # 'mtld_score',
+    'mtld_score',
     'mattr_score',
     'yules_k',
     'zipf_score',
@@ -20,7 +20,7 @@ SYNTACTIC_METRICS = ['fragment_ratio', 'avg_t_units', 'clause_to_t_unit_ratio', 
 
 # human-readable axis labels for each metric
 METRIC_LABELS = {
-    # 'mtld_score':             'MTLD Score',
+    'mtld_score':             'MTLD Score',
     'mattr_score':            'MATTR Score',
     'yules_k':                "Yule's K",
     'zipf_score':             'Zipf Score (avg. word frequency)',
@@ -203,9 +203,9 @@ def plot_complexity_by_user_frequency(df, metrics=LEXICAL_METRICS, bins=10):
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.show()
 
-def plot_lexical_metrics(df, metrics=LEXICAL_METRICS, rolling_window=None, resample_freq=None):
+def plot_lexical_metrics(df, metrics=LEXICAL_METRICS, rolling_window=None, resample_freq=None, agg='mean'):
     '''Plots lexical metrics from a dataframe on one figure with subplots, with a
-    shaded 95% confidence interval band around each mean line.
+    shaded 95% confidence interval band around each central-tendency line.
 
     Parameters:
     - metrics: list of metric column names to plot (default: LEXICAL_METRICS).
@@ -213,10 +213,16 @@ def plot_lexical_metrics(df, metrics=LEXICAL_METRICS, rolling_window=None, resam
       The band shows ±1.96 * (rolling SD / sqrt(rolling n)) at each point.
     - resample_freq: str, e.g., 'D', 'W', 'M' to aggregate metrics over time.
       The band shows ±1.96 * (SD / sqrt(n)) within each period — i.e., the 95%
-      confidence interval on the period mean, not the spread of individual posts.
+      confidence interval on the period statistic, not the spread of individual posts.
+    - agg: str, 'mean' (default) or 'median'. Determines the central tendency
+      statistic used for resampling and rolling aggregation. Note: CI bands are
+      only available for 'mean'; median plots are shown without a band.
 
     Note: bands are only drawn when rolling_window or resample_freq is supplied,
     since raw (unaggregated) values have no within-period uncertainty to display.'''
+
+    if agg not in ('mean', 'median'):
+        raise ValueError("agg must be 'mean' or 'median'")
 
     ts_df = _with_datetime_index(df)
     _require_columns(ts_df, metrics)
@@ -230,27 +236,35 @@ def plot_lexical_metrics(df, metrics=LEXICAL_METRICS, rolling_window=None, resam
         series = -ts_df[col] if negate else ts_df[col]
 
         if resample_freq:
-            resampled  = series.resample(resample_freq).agg(['mean', 'std', 'count'])
-            mean       = resampled['mean']
-            margin     = 1.96 * resampled['std'] / np.sqrt(resampled['count'])
-            label      = f'{resample_freq}-resampled mean ± 95% CI'
+            if agg == 'mean':
+                resampled  = series.resample(resample_freq).agg(['mean', 'std', 'count'])
+                central    = resampled['mean']
+                margin     = 1.96 * resampled['std'] / np.sqrt(resampled['count'])
+            else:
+                central    = series.resample(resample_freq).median()
+                margin     = None
+            label = f'{resample_freq}-resampled {agg} ± 95% CI' if agg == 'mean' else f'{resample_freq}-resampled {agg}'
         elif rolling_window:
-            mean       = series.rolling(window=rolling_window, min_periods=1).mean()
-            roll_std   = series.rolling(window=rolling_window, min_periods=1).std()
-            roll_n     = series.rolling(window=rolling_window, min_periods=1).count()
-            margin     = 1.96 * roll_std / np.sqrt(roll_n)
-            label      = f'rolling mean ± 95% CI (window={rolling_window})'
+            if agg == 'mean':
+                central    = series.rolling(window=rolling_window, min_periods=1).mean()
+                roll_std   = series.rolling(window=rolling_window, min_periods=1).std()
+                roll_n     = series.rolling(window=rolling_window, min_periods=1).count()
+                margin     = 1.96 * roll_std / np.sqrt(roll_n)
+            else:
+                central    = series.rolling(window=rolling_window, min_periods=1).median()
+                margin     = None
+            label = f'rolling {agg} ± 95% CI (window={rolling_window})' if agg == 'mean' else f'rolling {agg} (window={rolling_window})'
         else:
-            mean       = series
+            central    = series
             margin     = None
             label      = 'raw values'
 
-        axes[i].plot(mean.index, mean, color='tab:blue', linewidth=1.8)
+        axes[i].plot(central.index, central, color='tab:blue', linewidth=1.8)
         if margin is not None:
             axes[i].fill_between(
-                mean.index,
-                mean - margin,
-                mean + margin,
+                central.index,
+                central - margin,
+                central + margin,
                 color='tab:blue',
                 alpha=0.25,
                 linewidth=0,
