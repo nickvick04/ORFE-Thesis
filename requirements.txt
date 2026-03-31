@@ -11,4 +11,5 @@ nltk
 stanza
 convokit
 pymannkendall
+statsmodels
 ipykernel
