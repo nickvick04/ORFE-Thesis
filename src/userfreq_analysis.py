@@ -477,10 +477,10 @@ def plot_quality_by_freq_quartile(
 
     agg_note = 'speaker means' if agg_to_speaker else 'post level'
     axes[-1].set_xlabel(
-        'Posting Frequency Quartile  (Q1 = least frequent · Q4 = most frequent)'
+        'Posting Frequency Tier  (T1 = least frequent · T4 = most frequent)'
     )
     fig.suptitle(
-        f'Lexical Quality by Posting Frequency Quartile  ({agg_note})',
+        f'Lexical Quality by Posting Frequency Tier  ({agg_note})',
         fontsize=16,
     )
     plt.tight_layout(rect=[0, 0, 1, 0.97])
