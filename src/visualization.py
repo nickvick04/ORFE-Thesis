@@ -13,6 +13,9 @@ LEXICAL_METRICS = [
     'aoa_score',
     'nawl_ratio',
 ]
+
+# metrics that are negated before plotting so that higher always means greater lexical quality
+NEGATED_METRICS = {'yules_k', 'zipf_score'}
 SYNTACTIC_METRICS = ['fragment_ratio', 'avg_t_units', 'clause_to_t_unit_ratio', 'mltu']
 
 # human-readable axis labels for each metric
@@ -223,19 +226,22 @@ def plot_lexical_metrics(df, metrics=LEXICAL_METRICS, rolling_window=None, resam
         axes = [axes]
 
     for i, col in enumerate(metrics):
+        negate = col in NEGATED_METRICS
+        series = -ts_df[col] if negate else ts_df[col]
+
         if resample_freq:
-            resampled  = ts_df[col].resample(resample_freq).agg(['mean', 'std', 'count'])
+            resampled  = series.resample(resample_freq).agg(['mean', 'std', 'count'])
             mean       = resampled['mean']
             margin     = 1.96 * resampled['std'] / np.sqrt(resampled['count'])
             label      = f'{resample_freq}-resampled mean ± 95% CI'
         elif rolling_window:
-            mean       = ts_df[col].rolling(window=rolling_window, min_periods=1).mean()
-            roll_std   = ts_df[col].rolling(window=rolling_window, min_periods=1).std()
-            roll_n     = ts_df[col].rolling(window=rolling_window, min_periods=1).count()
+            mean       = series.rolling(window=rolling_window, min_periods=1).mean()
+            roll_std   = series.rolling(window=rolling_window, min_periods=1).std()
+            roll_n     = series.rolling(window=rolling_window, min_periods=1).count()
             margin     = 1.96 * roll_std / np.sqrt(roll_n)
             label      = f'rolling mean ± 95% CI (window={rolling_window})'
         else:
-            mean       = ts_df[col]
+            mean       = series
             margin     = None
             label      = 'raw values'
 
@@ -249,7 +255,10 @@ def plot_lexical_metrics(df, metrics=LEXICAL_METRICS, rolling_window=None, resam
                 alpha=0.25,
                 linewidth=0,
             )
-        axes[i].set_ylabel(METRIC_LABELS.get(col, col))
+        ylabel = METRIC_LABELS.get(col, col)
+        if negate:
+            ylabel = f'−{ylabel}'
+        axes[i].set_ylabel(ylabel)
         axes[i].grid(True, alpha=0.3)
 
     axes[-1].set_xlabel('Time')
