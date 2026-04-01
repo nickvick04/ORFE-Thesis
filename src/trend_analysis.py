@@ -394,10 +394,15 @@ def run_panel_fe(cross_panel: pd.DataFrame,
             print(f"         Skipping {metric}: fewer than 100 speakers with >= 2 obs.")
             continue
 
-        # linearmodels requires a MultiIndex of (entity, time)
+        # linearmodels requires a MultiIndex of (entity, time).
+        # After set_index, t_month moves into the index and is no longer a column,
+        # so X must be reconstructed from the index level rather than sliced from sub.
         sub = sub.set_index(['speaker_id', 't_month'])
         y = sub[[metric]]
-        X = sub[['t_month']].copy()
+        X = pd.DataFrame(
+            {'t_month': sub.index.get_level_values('t_month').astype(float)},
+            index=sub.index,
+        )
         w = np.where(sub['n_utt_sm'].values > 0, sub['n_utt_sm'].values, 1.0).astype(float)
 
         try:
@@ -461,7 +466,10 @@ def run_per_subreddit_fe(panel: pd.DataFrame,
 
             sub_m = sub_m.set_index(['speaker_id', 't_month'])
             y = sub_m[[metric]]
-            X = sub_m[['t_month']]
+            X = pd.DataFrame(
+                {'t_month': sub_m.index.get_level_values('t_month').astype(float)},
+                index=sub_m.index,
+            )
             w = np.where(sub_m['n_utt_sm'].values > 0,
                          sub_m['n_utt_sm'].values, 1.0).astype(float)
 
