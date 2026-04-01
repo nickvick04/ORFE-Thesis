@@ -196,6 +196,9 @@ def clean_and_prepare_lexical_df(df: pd.DataFrame) -> pd.DataFrame:
         (cleaned["date"].dt.year - earliest.year) * 12
         + (cleaned["date"].dt.month - earliest.month)
     ).where(cleaned["date"].notna())
+    cleaned["year_month"] = (
+        cleaned["date"].dt.to_period("M").astype(str).where(cleaned["date"].notna())
+    )
 
     # --- 3. Metric columns to numeric ---
     metric_cols = [m for m in LEXICAL_METRICS if m in cleaned.columns]
