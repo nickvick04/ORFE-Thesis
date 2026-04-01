@@ -188,8 +188,7 @@ def clean_and_prepare_lexical_df(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # --- 2. Timestamp conversion ---
-    unix_numeric = pd.to_numeric(cleaned["timestamp"], errors="coerce")
-    cleaned["date"] = pd.to_datetime(unix_numeric, unit="s", errors="coerce")
+    cleaned["date"] = pd.to_datetime(cleaned["timestamp"], errors="coerce")
 
     earliest = cleaned["date"].min()
     cleaned["months_elapsed"] = (
