@@ -330,7 +330,11 @@ def run_pooled_ols(cross_panel: pd.DataFrame,
             continue
 
         y = sub[metric].values
-        X = sm.add_constant(sub['t_month'].values, has_constant='add')
+        # Build X as a DataFrame so statsmodels names params 'const' and 't_month'.
+        # Using sm.add_constant on a numpy array produces a numpy array output,
+        # which causes fit.params to be an unlabelled ndarray (no .index attribute).
+        X = pd.DataFrame({'const': np.ones(len(sub), dtype=float),
+                          't_month': sub['t_month'].values.astype(float)})
         w = np.where(sub['n_utt_sm'].values > 0, sub['n_utt_sm'].values, 1.0).astype(float)
 
         fit = sm.WLS(y, X, weights=w).fit(
@@ -344,11 +348,12 @@ def run_pooled_ols(cross_panel: pd.DataFrame,
         resid_s = pd.Series(fit.resid, index=sub['t_month'].values)
         residuals[metric] = resid_s.groupby(level=0).mean().sort_index()
 
-        beta_key = 't_month' if 't_month' in fit.params.index else fit.params.index[-1]
+        beta  = float(fit.params['t_month'])
+        pval  = float(fit.pvalues['t_month'])
         print(f"         {METRIC_LABELS[metric]:25s}  "
-              f"beta/mo={float(fit.params[beta_key]):+.6f}  "
-              f"(ann.={float(fit.params[beta_key])*12:+.5f})  "
-              f"p={float(fit.pvalues[beta_key]):.4f}  n={int(fit.nobs):,}")
+              f"beta/mo={beta:+.6f}  "
+              f"(ann.={beta * 12:+.5f})  "
+              f"p={pval:.4f}  n={int(fit.nobs):,}")
 
     return pd.DataFrame(records), residuals
 

@@ -24,7 +24,7 @@
 # ============================================================
 LEXICAL_MASTER="/scratch/network/YOUR_NETID/Thesis-Data/Convokit/lexical_master.csv"
 OUTPUT_DIR="/scratch/network/YOUR_NETID/Thesis-Data/TrendResults"
-SRC_DIR="/home/YOUR_NETID/ORFE-Thesis/src"
+SRC_DIR="/scratch/network/nv9344/Thesis/ORFE-Thesis/src"
 
 # Analysis parameters — adjust as needed
 MIN_OBS=3           # minimum monthly observations per speaker
@@ -45,10 +45,15 @@ module load anaconda3/2023.9           # update version to match your Adroit mod
 
 conda activate thesis_env              # update to your conda environment name
 
-# Confirm linearmodels is available; install if not
-python -c "import linearmodels" 2>/dev/null || {
-    echo "linearmodels not found — installing..."
-    pip install linearmodels --user --quiet
+# Confirm linearmodels is importable.
+# Compute nodes have no internet access, so pip install will fail here.
+# If this check fails, run the following from the LOGIN NODE first:
+#   conda activate thesis-env && pip install linearmodels
+python -c "import linearmodels" || {
+    echo "ERROR: linearmodels is not installed in thesis-env."
+    echo "Install it from the login node before resubmitting:"
+    echo "  conda activate thesis-env && pip install linearmodels"
+    exit 1
 }
 
 # Create output and log directories if they don't exist
