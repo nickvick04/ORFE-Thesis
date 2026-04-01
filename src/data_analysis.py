@@ -141,18 +141,36 @@ def combine_pipeline_csvs_to_lexical_master(
     return output_path
 
 
-def clean_variation_and_subreddit_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize source_variation and subreddit based on hyphen-separated values.
+def clean_and_prepare_lexical_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Clean and prepare the master lexical DataFrame for analysis.
 
-    - source_variation: keep text before first hyphen (lowercased)
-    - subreddit: keep text after first hyphen
+    Steps performed, in order:
+
+    1. Normalize source_variation and subreddit columns:
+       - source_variation: keep text before the first hyphen (lowercased)
+       - subreddit: keep text after the first hyphen
+
+    2. Convert the timestamp column from Unix seconds to a tz-naive UTC
+       datetime, then derive two time columns:
+       - date          : full datetime (NaT where conversion fails)
+       - months_elapsed: integer months since the earliest valid observation,
+                         used as the sole time regressor in OLS / stationarity
+                         analysis
+
+    3. Convert all six lexical metric columns to numeric, coercing any
+       unparseable strings to NaN.
+
+    4. Drop rows where fewer than two of the six lexical metrics are non-null,
+       as these rows provide insufficient signal for any metric-level analysis.
     """
-    required_cols = {"source_variation", "subreddit"}
+    required_cols = {"source_variation", "subreddit", "timestamp"}
     missing = required_cols.difference(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
 
     cleaned = df.copy()
+
+    # --- 1. Normalize variation / subreddit labels ---
     cleaned["source_variation"] = (
         cleaned["source_variation"]
         .astype(str)
@@ -168,6 +186,27 @@ def clean_variation_and_subreddit_columns(df: pd.DataFrame) -> pd.DataFrame:
         .str.split("-", n=1)
         .str[-1]
     )
+
+    # --- 2. Timestamp conversion ---
+    unix_numeric = pd.to_numeric(cleaned["timestamp"], errors="coerce")
+    cleaned["date"] = pd.to_datetime(unix_numeric, unit="s", errors="coerce")
+
+    earliest = cleaned["date"].min()
+    cleaned["months_elapsed"] = (
+        (cleaned["date"].dt.year - earliest.year) * 12
+        + (cleaned["date"].dt.month - earliest.month)
+    ).where(cleaned["date"].notna())
+
+    # --- 3. Metric columns to numeric ---
+    metric_cols = [m for m in LEXICAL_METRICS if m in cleaned.columns]
+    cleaned[metric_cols] = cleaned[metric_cols].apply(
+        pd.to_numeric, errors="coerce"
+    )
+
+    # --- 4. Drop rows with fewer than 2 valid metrics ---
+    valid_metric_count = cleaned[metric_cols].notna().sum(axis=1)
+    cleaned = cleaned[valid_metric_count >= 2]
+
     return cleaned
 
 
