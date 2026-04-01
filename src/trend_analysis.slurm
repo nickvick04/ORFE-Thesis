@@ -1,30 +1,18 @@
 #!/bin/bash
-# ============================================================
-# SLURM job script — Trend Analysis (steps 1–7)
-# Princeton Adroit cluster
-#
-# Submit: sbatch trend_analysis.slurm
-# Monitor: squeue -u $USER
-# Logs:    logs/trend_analysis_<jobid>.out / .err
-# ============================================================
-
-#SBATCH --job-name=trend_analysis
+#SBATCH --job-name=lexical-temporal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
-#SBATCH --time=04:00:00
-#SBATCH --output=logs/trend_analysis_%j.out
-#SBATCH --error=logs/trend_analysis_%j.err
-#SBATCH --mail-type=end,fail
-#SBATCH --mail-user=nickvick04@gmail.com
+#SBATCH --cpus-per-task=2
+#SBATCH --mem-per-cpu=48G
+#SBATCH --time=08:00:00
+#SBATCH --mail-type=begin,end,fail
+#SBATCH --mail-user=nv9344@princeton.edu
+#SBATCH --output=/scratch/network/nv9344/Thesis/logs/%x_%j.out
+#SBATCH --error=/scratch/network/nv9344/Thesis/logs/%x_%j.err
 
-# ============================================================
-# CONFIGURE THESE PATHS BEFORE SUBMITTING
-# ============================================================
-LEXICAL_MASTER="/scratch/network/YOUR_NETID/Thesis-Data/Convokit/lexical_master.csv"
-OUTPUT_DIR="/scratch/network/YOUR_NETID/Thesis-Data/TrendResults"
-SRC_DIR="/scratch/network/nv9344/Thesis/ORFE-Thesis/src"
+LEXICAL_MASTER="/scratch/network/nv9344/Thesis/Thesis-Data/Convokit/lexical_master.csv"
+OUTPUT_DIR="/scratch/network/nv9344/Thesis/Thesis-Data/TrendResults"
+SRC_DIR="/home/nv9344/Thesis/ORFE-Thesis/src"
 
 # Analysis parameters — adjust as needed
 MIN_OBS=3           # minimum monthly observations per speaker
@@ -41,19 +29,13 @@ echo "============================================"
 
 # --- Environment setup ---
 module purge
-module load anaconda3/2023.9           # update version to match your Adroit module
+module load anaconda3/2025.12
+conda activate thesis-env
 
-conda activate thesis_env              # update to your conda environment name
-
-# Confirm linearmodels is importable.
-# Compute nodes have no internet access, so pip install will fail here.
-# If this check fails, run the following from the LOGIN NODE first:
-#   conda activate thesis-env && pip install linearmodels
-python -c "import linearmodels" || {
-    echo "ERROR: linearmodels is not installed in thesis-env."
-    echo "Install it from the login node before resubmitting:"
-    echo "  conda activate thesis-env && pip install linearmodels"
-    exit 1
+# Confirm linearmodels is available; install if not
+python -c "import linearmodels" 2>/dev/null || {
+    echo "linearmodels not found — installing..."
+    pip install linearmodels --user --quiet
 }
 
 # Create output and log directories if they don't exist
