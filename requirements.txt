@@ -12,4 +12,5 @@ stanza
 convokit
 pymannkendall
 statsmodels
+linearmodels
 ipykernel
