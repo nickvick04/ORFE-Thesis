@@ -1247,7 +1247,9 @@ def plot_arimax_fit(
         ax.set_xlabel("Month", fontsize=8)
         ax.tick_params(axis="x", labelsize=7, rotation=30)
         ax.tick_params(axis="y", labelsize=8)
-        ax.legend(fontsize=7.5, framealpha=0.85)
+        handles, _ = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(fontsize=7.5, framealpha=0.85)
 
     for ax in axes_flat[n_metrics:]:
         ax.set_visible(False)
