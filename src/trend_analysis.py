@@ -388,35 +388,24 @@ _CONTROL_SHORT = {
 }
 
 
-def _aggregate_speaker_month(
+def _prepare_panel(
     df: pd.DataFrame,
     subreddit: str,
-    metrics: Sequence[str],
-    controls: Sequence[str],
     subreddit_col: str,
     speaker_col: str,
     time_col: str,
     min_speaker_obs: int,
 ) -> pd.DataFrame:
-    """Aggregate utterance-level data to the speaker-month panel for one subreddit.
+    """Filter and prepare the speaker-month panel for one subreddit.
 
-    Steps:
-      1. Filter to the target subreddit.
-      2. Group by (speaker, year_month) and take the mean of all metric and
-         control columns. For 'num_utterances_by_speaker_month' all rows in a
-         group are identical (it is already a monthly count), so mean = first.
-      3. Compute t = months since each speaker's first post (exact, using
+    lexical_master.csv already contains exactly one row per speaker per month
+    (the longest post), so no aggregation is required. This function:
+      1. Filters to the target subreddit.
+      2. Computes t = months since each speaker's first post (exact, using
          year × 12 + month arithmetic rather than timedelta approximation).
-      4. Drop speakers with fewer than min_speaker_obs monthly observations.
+      3. Drops speakers with fewer than min_speaker_obs monthly observations.
     """
-    sub = df[df[subreddit_col] == subreddit].copy()
-
-    agg_cols = {col: "mean" for col in metrics + list(controls) if col in sub.columns}
-    panel = (
-        sub.groupby([speaker_col, time_col], sort=False)
-        .agg(agg_cols)
-        .reset_index()
-    )
+    panel = df[df[subreddit_col] == subreddit].copy()
 
     # Exact relative time: t = 0 at each speaker's first observed month
     dt = pd.to_datetime(panel[time_col].astype(str), format="%Y-%m")
@@ -469,16 +458,13 @@ def run_panel_ols(
     is N·T − N − K (accounting for the N absorbed fixed effects). With the
     speaker counts in this dataset the difference is negligible for inference.
 
-    Note on computational cost: the function aggregates the utterance-level
-    DataFrame to the speaker-month level internally. With the full 56M-row
-    corpus this aggregation can take several minutes per subreddit.
-
     Parameters
     ----------
     df : pd.DataFrame
-        Utterance-level DataFrame produced by clean_and_prepare_lexical_df().
-        Must contain speaker_col, subreddit_col, time_col (as 'YYYY-MM' strings),
-        the metric columns, and the control columns.
+        DataFrame produced by clean_and_prepare_lexical_df(). lexical_master.csv
+        already contains one row per speaker per month (longest post), so no
+        internal aggregation is performed. Must contain speaker_col, subreddit_col,
+        time_col (as 'YYYY-MM' strings), the metric columns, and the control columns.
     metrics : sequence of str, optional
         Dependent variables to model. Defaults to LEXICAL_METRICS.
     subreddit_col : str
@@ -531,10 +517,9 @@ def run_panel_ols(
 
     for subreddit in subreddits:
 
-        # Aggregate once per subreddit across all metrics + controls
-        panel_base = _aggregate_speaker_month(
-            df, subreddit, list(metrics), active_controls,
-            subreddit_col, speaker_col, time_col, min_speaker_obs,
+        # Prepare panel once per subreddit (filter, compute t, enforce min_speaker_obs)
+        panel_base = _prepare_panel(
+            df, subreddit, subreddit_col, speaker_col, time_col, min_speaker_obs,
         )
 
         for metric in metrics:
