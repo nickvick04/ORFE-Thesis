@@ -636,7 +636,7 @@ def summarize_panel_ols(results: pd.DataFrame) -> None:
     """Print a plain-text summary of panel OLS regression results.
 
     Shows conclusion counts, per-metric β₁ estimates with clustered SEs,
-    and the control coefficient signs for each significant series.
+    β₂ (control) significant coefficients, and overall breakdown.
 
     Parameters
     ----------
@@ -654,6 +654,7 @@ def summarize_panel_ols(results: pd.DataFrame) -> None:
     print("=== Panel OLS Summary (Speaker FE · Clustered SEs) ===")
     print("Model: y_it = β₀ + β₁·t + β₂·X_it + α_i + ε_it\n")
     print(f"Total (subreddit × metric) series: {total}")
+
     if "n_obs" in results.columns and "n_speakers" in results.columns:
         total_obs = results["n_obs"].sum()
         total_spk = results.groupby("subreddit")["n_speakers"].first().sum()
@@ -666,13 +667,18 @@ def summarize_panel_ols(results: pd.DataFrame) -> None:
         pct = 100 * count / total if total > 0 else 0.0
         print(f"  {conclusion:<28} {count:>4}  ({pct:.1f}%)")
 
+    # -----------------------------
+    # β1 (time trend) by metric
+    # -----------------------------
     print("\nBreakdown by metric (β₁ = monthly trend, t in speaker-relative months):")
     for metric in LEXICAL_METRICS:
         sub = results[results["metric"] == metric]
         if sub.empty:
             continue
+
         label = METRIC_LABELS.get(metric, metric)
         sig   = sub[sub["significant"] == True]
+
         if sig.empty:
             print(f"  {label:<18} →  no significant trends")
         else:
@@ -685,6 +691,49 @@ def summarize_panel_ols(results: pd.DataFrame) -> None:
                     f"(SE={row['se_beta_1']:.6f}, p={row['p_value']:.4f})"
                 )
             print(f"  {label:<18} →  " + ";  ".join(parts))
+
+    # -----------------------------
+    # β2 (X_it effect) significant
+    # -----------------------------
+    print("\nSignificant β₂ effects (X_it controls):")
+
+    if "beta_2" not in results.columns:
+        print("  β₂ column not found in results.")
+        return
+
+    any_sig = False
+
+    for metric in LEXICAL_METRICS:
+        sub = results[results["metric"] == metric]
+        if sub.empty:
+            continue
+
+        label = METRIC_LABELS.get(metric, metric)
+        sig2  = sub[sub["significant_beta_2"] == True] if "significant_beta_2" in sub.columns else sub[sub["significant"] == True]
+
+        # If you distinguish significance separately for β2, prefer that column.
+        sig2 = sub[sub["significant_beta_2"] == True] if "significant_beta_2" in sub.columns else sub[sub["significant"] == True]
+
+        sig2 = sig2[sig2["beta_2"].notna()] if "beta_2" in sub.columns else sig2
+
+        if sig2.empty:
+            continue
+
+        any_sig = True
+        parts = []
+        for _, row in sig2.iterrows():
+            direction = "↑" if row["beta_2"] > 0 else "↓"
+            parts.append(
+                f"{str(row['subreddit']).replace('subreddit-', 'r/')}: "
+                f"{direction} β₂={row['beta_2']:+.6f} "
+                f"(SE={row.get('se_beta_2', float('nan')):.6f}, "
+                f"p={row.get('p_beta_2', float('nan')):.4f})"
+            )
+
+        print(f"  {label:<18} →  " + ";  ".join(parts))
+
+    if not any_sig:
+        print("  no significant β₂ effects")
 
 
 # ----------------------------------------------------------------------------------------
