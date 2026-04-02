@@ -15,7 +15,8 @@ from scipy.stats import kruskal, mannwhitneyu, skew, kurtosis
 
 
 LEXICAL_METRICS = [
-    'mattr_score',  # mtld_score omitted; mattr preferred for short texts
+    'mtld_score',
+    'mattr_score',
     'yules_k',
     'zipf_score',
     'aoa_score',
@@ -23,6 +24,7 @@ LEXICAL_METRICS = [
 ]
 
 METRIC_LABELS = {
+    'mtld_score': 'MTLD Score',
     'mattr_score': 'MATTR Score',
     'yules_k':     "Yule's K",
     'zipf_score':  'Zipf Score (avg. word frequency)',
