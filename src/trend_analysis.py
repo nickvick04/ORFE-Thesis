@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from statsmodels.tsa.arima.model import ARIMA as _ARIMA
+from statsmodels.stats.diagnostic import acorr_ljungbox
 
 from series_analysis import (
     LEXICAL_METRICS,
@@ -774,6 +776,485 @@ def plot_panel_coef(
     fig.suptitle(
         "Panel OLS — β₁ Coefficient Plot  (Speaker FE · Clustered SEs)\n"
         "Filled = significant at α=0.05 · Hollow = not significant",
+        fontsize=12, fontweight="bold", y=1.01,
+    )
+
+    if save_path is not None:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Plot saved to: {save_path}")
+    else:
+        plt.show()
+
+
+# ----------------------------------------------------------------------------------------
+# ARIMAX with automatic order selection
+# Model: Δy_t = β₀ + Σβ_k X_{k,t} + Σφ_ℓ Δy_{t-ℓ} + Σθ_r ε_{t-r} + ε_t
+# ----------------------------------------------------------------------------------------
+
+def _build_arimax_series(
+    df: pd.DataFrame,
+    subreddit: str,
+    metric: str,
+    controls: Sequence[str],
+    subreddit_col: str,
+    time_col: str,
+) -> tuple:
+    """Aggregate df to subreddit-month level and return aligned (y, X) for ARIMAX.
+
+    Returns
+    -------
+    y : pd.Series
+        Monthly metric mean, DatetimeIndex, NaN rows dropped.
+    X : pd.DataFrame or None
+        Monthly control means aligned to y; None if no controls are available.
+    active_controls : list[str]
+        Controls that were present in df and included in X.
+    """
+    sub = df[df[subreddit_col] == subreddit]
+
+    agg_cols = {c: "mean" for c in [metric] + list(controls) if c in sub.columns}
+    agg = sub.groupby(time_col, sort=True).agg(agg_cols).reset_index()
+    agg[time_col] = pd.to_datetime(agg[time_col].astype(str), format="%Y-%m")
+    agg = agg.sort_values(time_col).reset_index(drop=True)
+
+    active_controls = [c for c in controls if c in agg.columns]
+    agg = agg.dropna(subset=[metric] + active_controls).reset_index(drop=True)
+
+    y = agg.set_index(time_col)[metric]
+    X = agg.set_index(time_col)[active_controls] if active_controls else None
+
+    return y, X, active_controls
+
+
+def _select_arimax_order(
+    y: pd.Series,
+    X,
+    max_p: int,
+    max_q: int,
+    ic: str,
+) -> tuple:
+    """Grid-search ARIMA(p,1,q) orders and return the best result by AIC or BIC.
+
+    All (p, q) combinations in [0, max_p] × [0, max_q] are tried. Failures
+    (non-convergence, singular matrices) are silently skipped. If every
+    combination fails, returns (0, 0, None).
+    """
+    best_ic_val = np.inf
+    best_order  = (0, 0)
+    best_result = None
+
+    for p in range(max_p + 1):
+        for q in range(max_q + 1):
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    res = _ARIMA(
+                        y, exog=X, order=(p, 1, q), trend="c",
+                    ).fit(method_kwargs={"warn_convergence": False})
+                ic_val = res.aic if ic == "aic" else res.bic
+                if ic_val < best_ic_val:
+                    best_ic_val = ic_val
+                    best_order  = (p, q)
+                    best_result = res
+            except Exception:
+                continue
+
+    return best_order, best_result
+
+
+def run_arimax_trend(
+    df: pd.DataFrame,
+    metrics: Optional[Sequence[str]] = None,
+    subreddit_col: str = "subreddit",
+    time_col: str = "year_month",
+    controls: Optional[Sequence[str]] = None,
+    max_p: int = 4,
+    max_q: int = 4,
+    ic: str = "aic",
+    alpha: float = 0.05,
+    min_obs: int = 20,
+) -> pd.DataFrame:
+    """Fit an ARIMAX model with automatic order selection per subreddit × metric.
+
+    Model (estimated separately for each subreddit × metric pair):
+
+        Δy_t = β₀ + Σ β_k X_{k,t} + Σ φ_ℓ Δy_{t-ℓ} + Σ θ_r ε_{t-r} + ε_t
+
+    where
+      Δy_t    = first difference of the subreddit-month mean metric
+      β₀      = drift constant (significant β₀ > 0 → upward trend)
+      X_{k,t} = subreddit-month means of external predictors (controls)
+      φ_ℓ     = AR coefficients on lagged differences
+      θ_r     = MA coefficients on lagged residuals
+
+    Order selection: all (p, q) combinations in [0, max_p] × [0, max_q] are
+    fitted; the combination minimising AIC (or BIC if ic='bic') is selected.
+    The differencing order d is fixed at 1 throughout, consistent with the
+    first-differencing used in the stationarity analysis.
+
+    X_{k,t} are aggregated from the utterance-level df to subreddit-month means
+    internally, so no pre-aggregated DataFrame is required.
+
+    Residual adequacy is checked via a Ljung-Box test at lag min(12, T/5) on
+    the model residuals. Significant residual autocorrelation suggests the
+    selected (p, q) order is insufficient and max_p or max_q should be raised.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame produced by clean_and_prepare_lexical_df(). Must contain
+        subreddit_col, time_col (as 'YYYY-MM' strings), metric columns, and
+        control columns.
+    metrics : sequence of str, optional
+        Dependent variables to model. Defaults to LEXICAL_METRICS.
+    subreddit_col : str
+        Column identifying the community (default 'subreddit').
+    time_col : str
+        Column containing year-month strings, e.g. '2015-03' (default 'year_month').
+    controls : sequence of str, optional
+        Exogenous predictor columns X_{k,t}. Defaults to PANEL_CONTROLS.
+        Controls absent from df are silently dropped.
+    max_p : int
+        Maximum AR order to consider during grid search (default 4).
+    max_q : int
+        Maximum MA order to consider during grid search (default 4).
+    ic : str
+        Information criterion for order selection: 'aic' (default) or 'bic'.
+    alpha : float
+        Significance level for drift and residual tests (default 0.05).
+    min_obs : int
+        Minimum subreddit-month observations required to fit the model
+        (default 20). Must exceed max_p + max_q + number of controls.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (subreddit, metric) with columns:
+          subreddit, metric, n_obs, p, q,
+          beta_0, se_beta_0, pval_beta_0,
+          beta_{c}, se_{c}, pval_{c}  for each active control c,
+          aic, bic,
+          lb_stat_resid, lb_p_resid, resid_autocorr,
+          significant_drift, conclusion
+    """
+    if metrics is None:
+        metrics = list(LEXICAL_METRICS)
+    if controls is None:
+        controls = PANEL_CONTROLS
+
+    for col in (subreddit_col, time_col):
+        if col not in df.columns:
+            raise ValueError(f"Missing required column: '{col}'")
+
+    missing_metrics = [m for m in metrics if m not in df.columns]
+    if missing_metrics:
+        raise ValueError(f"Missing metric columns: {missing_metrics}")
+
+    active_controls = [c for c in controls if c in df.columns]
+
+    subreddits = sorted(df[subreddit_col].dropna().unique())
+    records    = []
+
+    for subreddit in subreddits:
+        for metric in metrics:
+
+            y, X, present_controls = _build_arimax_series(
+                df, subreddit, metric, active_controls, subreddit_col, time_col,
+            )
+            n = len(y)
+
+            # Build the insufficient-data record template
+            insuff = dict(
+                subreddit=subreddit, metric=metric, n_obs=n,
+                p=np.nan, q=np.nan,
+                beta_0=np.nan, se_beta_0=np.nan, pval_beta_0=np.nan,
+                aic=np.nan, bic=np.nan,
+                lb_stat_resid=np.nan, lb_p_resid=np.nan,
+                resid_autocorr=np.nan,
+                significant_drift=np.nan, conclusion="insufficient data",
+            )
+            for c in active_controls:
+                short = _CONTROL_SHORT.get(c, c)
+                insuff[f"beta_{short}"] = np.nan
+                insuff[f"se_{short}"]   = np.nan
+                insuff[f"pval_{short}"] = np.nan
+
+            if n < min_obs:
+                records.append(insuff)
+                continue
+
+            (p, q), res = _select_arimax_order(y, X, max_p, max_q, ic)
+
+            if res is None:
+                records.append(insuff)
+                continue
+
+            # --- Drift / constant (β₀) ---
+            # statsmodels names it 'const' for ARIMA with trend='c'
+            const_name = next(
+                (nm for nm in res.param_names if nm in ("const", "intercept")),
+                None,
+            )
+            if const_name is not None:
+                beta_0      = round(float(res.params[const_name]),  6)
+                se_beta_0   = round(float(res.bse[const_name]),     6)
+                pval_beta_0 = round(float(res.pvalues[const_name]), 6)
+            else:
+                beta_0 = se_beta_0 = pval_beta_0 = np.nan
+
+            # --- Residual Ljung-Box check ---
+            lb_lag  = max(1, min(12, n // 5))
+            lb      = acorr_ljungbox(res.resid, lags=[lb_lag], return_df=True)
+            lb_stat = round(float(lb["lb_stat"].iloc[0]),   4)
+            lb_p    = round(float(lb["lb_pvalue"].iloc[0]), 6)
+            resid_autocorr = bool(lb_p < alpha)
+
+            # --- Drift significance and conclusion ---
+            significant_drift = (
+                not np.isnan(pval_beta_0) and pval_beta_0 < alpha
+            )
+            if not significant_drift:
+                conclusion = "no significant drift"
+            elif beta_0 > 0:
+                conclusion = "upward drift"
+            else:
+                conclusion = "downward drift"
+
+            record = dict(
+                subreddit=subreddit,
+                metric=metric,
+                n_obs=n,
+                p=int(p),
+                q=int(q),
+                beta_0=beta_0,
+                se_beta_0=se_beta_0,
+                pval_beta_0=pval_beta_0,
+                aic=round(float(res.aic), 4),
+                bic=round(float(res.bic), 4),
+                lb_stat_resid=lb_stat,
+                lb_p_resid=lb_p,
+                resid_autocorr=resid_autocorr,
+                significant_drift=significant_drift,
+                conclusion=conclusion,
+            )
+
+            # --- Exogenous coefficients (β_k) ---
+            for c in present_controls:
+                short = _CONTROL_SHORT.get(c, c)
+                if c in res.param_names:
+                    record[f"beta_{short}"] = round(float(res.params[c]),  6)
+                    record[f"se_{short}"]   = round(float(res.bse[c]),     6)
+                    record[f"pval_{short}"] = round(float(res.pvalues[c]), 6)
+                else:
+                    record[f"beta_{short}"] = np.nan
+                    record[f"se_{short}"]   = np.nan
+                    record[f"pval_{short}"] = np.nan
+
+            records.append(record)
+
+    # Build ordered column list
+    control_cols = []
+    for c in active_controls:
+        short = _CONTROL_SHORT.get(c, c)
+        control_cols += [f"beta_{short}", f"se_{short}", f"pval_{short}"]
+
+    RESULT_COLS = (
+        ["subreddit", "metric", "n_obs", "p", "q",
+         "beta_0", "se_beta_0", "pval_beta_0"]
+        + control_cols
+        + ["aic", "bic", "lb_stat_resid", "lb_p_resid",
+           "resid_autocorr", "significant_drift", "conclusion"]
+    )
+    if not records:
+        return pd.DataFrame(columns=RESULT_COLS)
+    return pd.DataFrame(records, columns=RESULT_COLS)
+
+
+# ----------------------------------------------------------------------------------------
+# ARIMAX summary
+# ----------------------------------------------------------------------------------------
+
+def summarize_arimax_trend(results: pd.DataFrame) -> None:
+    """Print a plain-text summary of ARIMAX trend results.
+
+    Reports selected orders, drift significance, residual adequacy, and
+    the β_k coefficients for each active control across all subreddit × metric
+    pairs.
+
+    Parameters
+    ----------
+    results : pd.DataFrame
+        Output of run_arimax_trend().
+    """
+    if results.empty or "conclusion" not in results.columns:
+        print("No ARIMAX results to summarize.")
+        return
+
+    total  = len(results)
+    counts = results["conclusion"].value_counts()
+
+    print("=== ARIMAX Trend Summary  (d=1, AIC order selection) ===")
+    print("Model: Δy_t = β₀ + ΣβₖX_{k,t} + Σφ_ℓ Δy_{t-ℓ} + Σθ_r ε_{t-r} + ε_t\n")
+    print(f"Total (subreddit × metric) series: {total}\n")
+
+    print("Drift conclusions:")
+    for conclusion in TREND_CONCLUSIONS:
+        count = counts.get(conclusion, 0)
+        pct   = 100 * count / total if total > 0 else 0.0
+        print(f"  {conclusion:<28} {count:>4}  ({pct:.1f}%)")
+
+    # Residual adequacy
+    if "resid_autocorr" in results.columns:
+        n_ac  = results["resid_autocorr"].sum()
+        pct   = 100 * n_ac / total if total > 0 else 0.0
+        print(f"\nResidual autocorrelation detected: {int(n_ac)}/{total} ({pct:.1f}%)")
+        if n_ac > 0:
+            print("  → Consider raising max_p or max_q for flagged series.")
+
+    # Selected orders
+    if "p" in results.columns and "q" in results.columns:
+        order_counts = results.groupby(["p", "q"]).size().sort_values(ascending=False)
+        print("\nMost common selected orders (p, q):")
+        for (p, q), cnt in order_counts.head(5).items():
+            print(f"  ARIMA({int(p)},1,{int(q)})  →  {cnt} series")
+
+    print("\nBreakdown by metric (β₀ = drift in first-differenced series):")
+    for metric in LEXICAL_METRICS:
+        sub = results[results["metric"] == metric]
+        if sub.empty:
+            continue
+        label = METRIC_LABELS.get(metric, metric)
+        sig   = sub[sub["significant_drift"] == True]
+        if sig.empty:
+            print(f"  {label:<18} →  no significant drift")
+        else:
+            parts = []
+            for _, row in sig.iterrows():
+                direction = "↑" if row["beta_0"] > 0 else "↓"
+                ac_flag   = "  ⚠ resid AC" if row.get("resid_autocorr") else ""
+                parts.append(
+                    f"{str(row['subreddit']).replace('subreddit-', 'r/')}: "
+                    f"{direction} β₀={row['beta_0']:+.6f} "
+                    f"(SE={row['se_beta_0']:.6f}, p={row['pval_beta_0']:.4f})"
+                    f"  ARIMA({int(row['p'])},1,{int(row['q'])}){ac_flag}"
+                )
+            print(f"  {label:<18} →  " + ";  ".join(parts))
+
+
+# ----------------------------------------------------------------------------------------
+# ARIMAX fitted-vs-actual visualization
+# ----------------------------------------------------------------------------------------
+
+def plot_arimax_fit(
+    df: pd.DataFrame,
+    results: pd.DataFrame,
+    metrics: Optional[Sequence[str]] = None,
+    subreddit_col: str = "subreddit",
+    time_col: str = "year_month",
+    controls: Optional[Sequence[str]] = None,
+    save_path: Optional["str | Path"] = None,
+) -> None:
+    """Plot actual vs ARIMAX in-sample fitted values for each metric × subreddit.
+
+    Fitted values are shown in the original (levels) scale — statsmodels
+    integrates the first-differenced predictions back automatically via
+    ``predict()``. One subplot per metric; one line per subreddit.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Same utterance-level DataFrame passed to run_arimax_trend().
+    results : pd.DataFrame
+        Output of run_arimax_trend().
+    metrics : sequence of str, optional
+        Metrics to plot. Defaults to all metrics present in results.
+    subreddit_col : str
+        Column identifying the community (default 'subreddit').
+    time_col : str
+        Column containing year-month strings (default 'year_month').
+    controls : sequence of str, optional
+        Must match the controls used in run_arimax_trend() (default PANEL_CONTROLS).
+    save_path : str or Path, optional
+        If provided, saves the figure instead of displaying it.
+    """
+    if metrics is None:
+        metrics = [m for m in LEXICAL_METRICS if m in results["metric"].values]
+    if controls is None:
+        controls = PANEL_CONTROLS
+
+    active_controls = [c for c in controls if c in df.columns]
+    subreddits      = sorted(results["subreddit"].dropna().unique())
+    n_metrics       = len(metrics)
+    n_cols          = 2
+    n_rows          = int(np.ceil(n_metrics / n_cols))
+
+    palette   = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    color_map = {s: palette[i % len(palette)] for i, s in enumerate(subreddits)}
+
+    fig, axes = plt.subplots(n_rows, n_cols,
+                             figsize=(7 * n_cols, 3.8 * n_rows),
+                             constrained_layout=True)
+    axes_flat = np.array(axes).flatten()
+
+    for ax_idx, metric in enumerate(metrics):
+        ax    = axes_flat[ax_idx]
+        label = METRIC_LABELS.get(metric, metric)
+
+        for subreddit in subreddits:
+            row_mask = (results["subreddit"] == subreddit) & (results["metric"] == metric)
+            row      = results[row_mask]
+            color    = color_map[subreddit]
+            short    = str(subreddit).replace("subreddit-", "r/")
+
+            y, X, present_controls = _build_arimax_series(
+                df, subreddit, metric, active_controls, subreddit_col, time_col,
+            )
+            if len(y) == 0:
+                continue
+
+            # Plot actual series
+            ax.plot(y.index, y.values, color=color, alpha=0.35, linewidth=1.0)
+
+            # Refit with stored (p, q) to get in-sample predictions
+            if row.empty or pd.isna(row["p"].values[0]):
+                continue
+            p_sel = int(row["p"].values[0])
+            q_sel = int(row["q"].values[0])
+
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    res = _ARIMA(y, exog=X, order=(p_sel, 1, q_sel), trend="c").fit(
+                        method_kwargs={"warn_convergence": False}
+                    )
+                # predict() returns values in the original levels scale
+                fitted = res.predict(start=0, end=len(y) - 1)
+                sig    = bool(row["significant_drift"].values[0])
+                pval   = row["pval_beta_0"].values[0]
+                ax.plot(
+                    y.index, fitted,
+                    color=color, linewidth=2.0,
+                    linestyle="-" if sig else "--",
+                    label=(
+                        f"{short}  ARIMA({p_sel},1,{q_sel})"
+                        f"  p={pval:.3f}{'*' if sig else ''}"
+                    ),
+                )
+            except Exception:
+                continue
+
+        ax.set_title(label, fontsize=11, fontweight="bold")
+        ax.set_xlabel("Month", fontsize=8)
+        ax.tick_params(axis="x", labelsize=7, rotation=30)
+        ax.tick_params(axis="y", labelsize=8)
+        ax.legend(fontsize=7.5, framealpha=0.85)
+
+    for ax in axes_flat[n_metrics:]:
+        ax.set_visible(False)
+
+    fig.suptitle(
+        "ARIMAX Fitted vs Actual  (d=1 · AIC order selection)\n"
+        "Solid = significant drift at α=0.05 · Dashed = not significant",
         fontsize=12, fontweight="bold", y=1.01,
     )
 
