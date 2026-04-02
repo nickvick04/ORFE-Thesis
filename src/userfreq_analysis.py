@@ -616,6 +616,302 @@ def run_freq_quartile_tests(
 
 
 # -----------------------------------------------------------------------------------------
+# Effect size analysis
+# -----------------------------------------------------------------------------------------
+
+def compute_effect_sizes(
+    df: pd.DataFrame,
+    metrics: Optional[Sequence[str]] = None,
+    agg_to_speaker: bool = True,
+    alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Compute rank-biserial correlation effect sizes for all pairwise tier comparisons.
+
+    The rank-biserial correlation r is derived from the Mann-Whitney U statistic:
+
+        r = 2·U₁₂ / (n₁·n₂) − 1
+
+    where U₁₂ is the U statistic for group_1 vs group_2 (i.e. how often a
+    randomly drawn observation from group_1 exceeds one from group_2).  Values
+    range from −1 to +1; r > 0 means group_1 tends to score higher on the
+    metric.
+
+    For metrics in NEGATED_METRICS (Yule's K, Zipf Score), where lower raw
+    values correspond to higher lexical quality, the sign of r is flipped so
+    that positive r consistently means group_1 has *greater* lexical quality
+    than group_2.
+
+    Effect size magnitudes follow the benchmarks in Cohen (1988):
+
+        |r| < 0.10  → negligible
+        |r| < 0.30  → small
+        |r| < 0.50  → medium
+        |r| ≥ 0.50  → large
+
+    BH correction is applied jointly across all pairwise comparisons and all
+    metrics (same procedure as :func:`run_freq_quartile_tests`).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain 'freq_quartile', 'speaker_id', and all metric columns.
+        Call :func:`assign_freq_quartiles` first.
+    metrics : list of str, optional
+        Metrics to compute effect sizes for.  Defaults to LEXICAL_METRICS.
+    agg_to_speaker : bool
+        If True (default), average each speaker's monthly rows first so every
+        speaker contributes one observation per metric.
+    alpha : float
+        BH-corrected significance threshold (default 0.05).
+
+    Returns
+    -------
+    pd.DataFrame
+        Tidy table, one row per (metric, group_1, group_2), with columns:
+
+        metric      – lexical metric name
+        group_1     – reference tier label
+        group_2     – comparison tier label
+        n_1         – number of speakers in group_1
+        n_2         – number of speakers in group_2
+        U_stat      – Mann-Whitney U statistic (group_1 vs group_2)
+        r           – rank-biserial correlation (sign-adjusted for NEGATED_METRICS)
+        magnitude   – 'negligible', 'small', 'medium', or 'large'
+        p_value     – raw two-sided p-value
+        p_adjusted  – BH-corrected p-value
+        significant – True if p_adjusted <= alpha
+    """
+    if metrics is None:
+        metrics = LEXICAL_METRICS
+
+    _require_columns(df, ['freq_quartile', 'speaker_id', *metrics])
+
+    test_df = df.dropna(subset=['freq_quartile']).copy()
+    if agg_to_speaker:
+        test_df = (
+            test_df
+            .groupby(['speaker_id', 'freq_quartile'], observed=True)[list(metrics)]
+            .mean()
+            .reset_index()
+        )
+    test_df['freq_quartile'] = test_df['freq_quartile'].astype(str)
+    quartiles = sorted(test_df['freq_quartile'].unique().tolist())
+    pairs = list(combinations(quartiles, 2))
+
+    records = []
+    for metric in metrics:
+        negate = metric in NEGATED_METRICS
+        for q1, q2 in pairs:
+            g1 = test_df.loc[test_df['freq_quartile'] == q1, metric].dropna().values
+            g2 = test_df.loc[test_df['freq_quartile'] == q2, metric].dropna().values
+
+            if len(g1) < 2 or len(g2) < 2:
+                records.append(dict(
+                    metric=metric, group_1=q1, group_2=q2,
+                    n_1=len(g1), n_2=len(g2),
+                    U_stat=np.nan, r=np.nan,
+                    magnitude='insufficient data',
+                    p_value=np.nan, p_adjusted=np.nan, significant=False,
+                ))
+                continue
+
+            U_stat, p_val = mannwhitneyu(g1, g2, alternative='two-sided')
+            r = 2 * U_stat / (len(g1) * len(g2)) - 1
+            if negate:
+                r = -r  # flip: positive r → group_1 has greater lexical quality
+
+            abs_r = abs(r)
+            if abs_r < 0.10:
+                magnitude = 'negligible'
+            elif abs_r < 0.30:
+                magnitude = 'small'
+            elif abs_r < 0.50:
+                magnitude = 'medium'
+            else:
+                magnitude = 'large'
+
+            records.append(dict(
+                metric=metric, group_1=q1, group_2=q2,
+                n_1=len(g1), n_2=len(g2),
+                U_stat=round(float(U_stat), 2),
+                r=round(float(r), 4),
+                magnitude=magnitude,
+                p_value=p_val, p_adjusted=np.nan, significant=False,
+            ))
+
+    result_df = pd.DataFrame(records)
+
+    valid = result_df['p_value'].notna()
+    if valid.any():
+        raw_p = result_df.loc[valid, 'p_value'].to_numpy(dtype=float)
+        adj_p = _bh_adjust(raw_p)
+        result_df.loc[valid, 'p_adjusted'] = np.round(adj_p, 6)
+        result_df.loc[valid, 'significant'] = adj_p <= alpha
+
+    result_df['p_value'] = result_df['p_value'].round(6)
+    return result_df
+
+
+def plot_effect_size_heatmap(
+    df: pd.DataFrame,
+    metrics: Optional[Sequence[str]] = None,
+    agg_to_speaker: bool = True,
+    alpha: float = 0.05,
+) -> None:
+    """Plot a heatmap of rank-biserial correlation effect sizes across frequency tiers.
+
+    One heatmap is drawn per metric, arranged in a row.  Each cell [row, col]
+    shows the rank-biserial r for (row tier) vs (col tier): positive values
+    (blue) mean the row tier has greater lexical quality; negative values (red)
+    mean the row tier has lower lexical quality.  The diagonal is zero by
+    definition and is left blank.
+
+    Significance conventions (BH-corrected at ``alpha``):
+
+        ***  p_adjusted < 0.001
+        **   p_adjusted < 0.01
+        *    p_adjusted < 0.05
+        ns   not significant
+
+    Non-significant cells are visually distinguished with a grey diagonal cross
+    so that significant differences stand out immediately.
+
+    For NEGATED_METRICS (Yule's K, Zipf Score), r is sign-adjusted before
+    plotting so that blue consistently indicates greater lexical quality,
+    regardless of the raw metric direction.
+
+    Calls :func:`compute_effect_sizes` internally.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain 'freq_quartile', 'speaker_id', and all metric columns.
+        Call :func:`assign_freq_quartiles` first.
+    metrics : list of str, optional
+        Defaults to LEXICAL_METRICS.
+    agg_to_speaker : bool
+        Average each speaker's rows first (default True).
+    alpha : float
+        BH-corrected significance threshold (default 0.05).
+    """
+    if metrics is None:
+        metrics = LEXICAL_METRICS
+
+    effect_df = compute_effect_sizes(
+        df, metrics=metrics, agg_to_speaker=agg_to_speaker, alpha=alpha
+    )
+
+    tiers = sorted(
+        set(effect_df['group_1'].dropna().tolist()) |
+        set(effect_df['group_2'].dropna().tolist())
+    )
+    n_tiers = len(tiers)
+    tier_idx = {t: i for i, t in enumerate(tiers)}
+    n_metrics = len(metrics)
+
+    fig, axes = plt.subplots(
+        1, n_metrics,
+        figsize=(4.8 * n_metrics, 4.2),
+        squeeze=False,
+    )
+    axes = axes[0]  # unpack the single row
+
+    for ax_idx, metric in enumerate(metrics):
+        ax = axes[ax_idx]
+        mdf = effect_df[effect_df['metric'] == metric]
+
+        # Build full n×n matrices for r, significance stars, and p_adjusted.
+        r_mat = np.full((n_tiers, n_tiers), np.nan)
+        np.fill_diagonal(r_mat, 0.0)
+        sig_mat = np.zeros((n_tiers, n_tiers), dtype=bool)
+        padj_mat = np.ones((n_tiers, n_tiers))
+
+        for _, row in mdf.iterrows():
+            i, j = tier_idx[row['group_1']], tier_idx[row['group_2']]
+            r_val = row['r'] if pd.notna(row['r']) else 0.0
+            p_adj = row['p_adjusted'] if pd.notna(row['p_adjusted']) else 1.0
+            sig   = bool(row['significant'])
+            # antisymmetric: r(A→B) = −r(B→A)
+            r_mat[i, j] =  r_val;  r_mat[j, i] = -r_val
+            sig_mat[i, j] = sig;   sig_mat[j, i] = sig
+            padj_mat[i, j] = p_adj; padj_mat[j, i] = p_adj
+
+        # Draw heatmap with seaborn (annotation built separately below).
+        annot = np.empty((n_tiers, n_tiers), dtype=object)
+        for i in range(n_tiers):
+            for j in range(n_tiers):
+                if i == j:
+                    annot[i, j] = ''
+                    continue
+                r_val = r_mat[i, j]
+                p_adj = padj_mat[i, j]
+                sig   = sig_mat[i, j]
+                if   p_adj < 0.001: stars = '***'
+                elif p_adj < 0.01:  stars = '**'
+                elif p_adj < 0.05:  stars = '*'
+                else:               stars = 'ns'
+                annot[i, j] = f'{r_val:+.2f}\n{stars}'
+
+        # Mask diagonal for seaborn (NaN → grey square).
+        plot_mat = r_mat.copy()
+        np.fill_diagonal(plot_mat, np.nan)
+        mask_diag = np.zeros((n_tiers, n_tiers), dtype=bool)
+        np.fill_diagonal(mask_diag, True)
+
+        sns.heatmap(
+            plot_mat,
+            mask=mask_diag,
+            annot=annot,
+            fmt='',
+            cmap='RdBu_r',
+            vmin=-1, vmax=1, center=0,
+            linewidths=0.6, linecolor='white',
+            xticklabels=tiers, yticklabels=tiers,
+            cbar_kws={'label': 'r  (rank-biserial)', 'shrink': 0.82},
+            annot_kws={'size': 8.5},
+            ax=ax,
+        )
+
+        # Shade diagonal cells grey.
+        for k in range(n_tiers):
+            ax.add_patch(plt.Rectangle(
+                (k, k), 1, 1,
+                color='#d0d0d0', zorder=2, linewidth=0,
+            ))
+
+        # Add a subtle grey cross to non-significant off-diagonal cells.
+        for i in range(n_tiers):
+            for j in range(n_tiers):
+                if i != j and not sig_mat[i, j]:
+                    cx, cy = j + 0.5, i + 0.5
+                    ax.plot(
+                        [j + 0.12, j + 0.88], [i + 0.12, i + 0.88],
+                        color='#999999', linewidth=1.0, zorder=3,
+                    )
+                    ax.plot(
+                        [j + 0.12, j + 0.88], [i + 0.88, i + 0.12],
+                        color='#999999', linewidth=1.0, zorder=3,
+                    )
+
+        title = METRIC_LABELS.get(metric, metric)
+        if metric in NEGATED_METRICS:
+            title += '\n(sign-adjusted)'
+        ax.set_title(title, fontsize=9.5, fontweight='bold', pad=8)
+        ax.set_xlabel('Comparison Tier', fontsize=8.5)
+        ax.set_ylabel('Reference Tier', fontsize=8.5)
+        ax.tick_params(axis='both', labelsize=8)
+
+    fig.suptitle(
+        'Pairwise Effect Sizes by Frequency Tier  (rank-biserial r)\n'
+        'Blue = row tier has greater lexical quality · '
+        'grey cross = non-significant (BH-corrected)',
+        fontsize=11, y=1.03,
+    )
+    plt.tight_layout()
+    plt.show()
+
+
+# -----------------------------------------------------------------------------------------
 # Frequency distribution diagnostics
 # -----------------------------------------------------------------------------------------
 
