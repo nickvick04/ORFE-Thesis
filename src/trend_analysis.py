@@ -510,7 +510,10 @@ def run_panel_ols(
         Column containing year-month strings, e.g. '2015-03' (default 'year_month').
     freq_col : str
         Column containing user activity frequency F_it
-        (default 'num_utterances_by_speaker_month').
+        (default 'num_utterances_by_speaker_month'). The regressor used in
+        estimation is log(1 + freq_col) to compress the right-skewed count
+        distribution; β_F is therefore interpretable as the effect of a
+        unit increase in log-activity on the lexical quality metric.
     controls : sequence of str, optional
         Control columns X_ist. Defaults to PANEL_CONTROLS:
         [post_depth, score, num_direct_replies]. Any control absent from df is
@@ -599,8 +602,15 @@ def run_panel_ols(
             records.append(insufficient_record)
             continue
 
-        # Regressor order: [F_it, ctrl1, ctrl2, …]
-        reg_vars = [freq_col] + [c for c in active_controls if c in available]
+        # Log-transform F_it: log(1 + count) compresses right-skewed activity
+        # distribution and makes β_F interpretable as a semi-elasticity.
+        # log1p is used so that zero-utterance rows (if any survive filtering)
+        # are mapped to 0 rather than -inf.
+        _log_freq = "_log_F_it"
+        panel[_log_freq] = np.log1p(panel[freq_col].values)
+
+        # Regressor order: [log(F_it), ctrl1, ctrl2, …]
+        reg_vars = [_log_freq] + [c for c in active_controls if c in available]
 
         # --- 3-way within-transformation (user × time × subreddit) ---
         all_vars = [metric] + reg_vars
