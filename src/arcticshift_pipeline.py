@@ -132,7 +132,8 @@ def arcticshift_longest_posts_batches(
     pd.DataFrame with columns:
         utterance_id, speaker_id, raw_text, timestamp, subreddit,
         num_utterances_by_speaker, num_utterances_by_speaker_month,
-        post_depth, score, num_direct_replies
+        post_depth, score, num_direct_replies,
+        controversiality, edited
     """
     if num_shards < 1:
         raise ValueError("num_shards must be >= 1")
@@ -149,9 +150,11 @@ def arcticshift_longest_posts_batches(
     counts_by_speaker       = {}   # speaker_id → all-time post count
     counts_by_speaker_month = {}   # (speaker_id, (year, month)) → monthly count
     parent_by_utt           = {}   # utt_id → normalised parent utt_id or None
-    score_by_utt            = {}   # utt_id → Reddit score int or None
-    direct_reply_counts     = {}   # utt_id → number of direct replies
-    subreddit_by_utt        = {}   # utt_id → subreddit string
+    score_by_utt              = {}   # utt_id → Reddit score int or None
+    direct_reply_counts       = {}   # utt_id → number of direct replies
+    subreddit_by_utt          = {}   # utt_id → subreddit string
+    controversiality_by_utt   = {}   # utt_id → controversiality flag (0 or 1)
+    edited_by_utt             = {}   # utt_id → False, or Unix timestamp of edit
 
     # ------------------------------------------------------------------
     # Pass 1 — scan the file to build the selection index
@@ -166,17 +169,21 @@ def arcticshift_longest_posts_batches(
                 continue
 
             utt_id, speaker_id, raw_text, timestamp = _extract_arcticshift_fields(obj)
-            parent_id = _extract_arcticshift_parent_id(obj)
-            score     = obj.get("score")
-            subreddit = obj.get("subreddit")
+            parent_id       = _extract_arcticshift_parent_id(obj)
+            score           = obj.get("score")
+            subreddit       = obj.get("subreddit")
+            controversiality = obj.get("controversiality")
+            edited          = obj.get("edited")
 
             # Populate per-utterance lookup tables even for posts we will
             # later filter out, so that depth and reply-count calculations
             # can still traverse the full parent chain.
             if utt_id is not None:
-                score_by_utt[utt_id]     = score
-                parent_by_utt[utt_id]    = parent_id
-                subreddit_by_utt[utt_id] = subreddit
+                score_by_utt[utt_id]            = score
+                parent_by_utt[utt_id]           = parent_id
+                subreddit_by_utt[utt_id]        = subreddit
+                controversiality_by_utt[utt_id] = controversiality
+                edited_by_utt[utt_id]           = edited
                 if parent_id is not None:
                     direct_reply_counts[parent_id] = (
                         direct_reply_counts.get(parent_id, 0) + 1
@@ -274,8 +281,10 @@ def arcticshift_longest_posts_batches(
                 "post_depth":       _compute_post_depth(
                                         utt_id, parent_by_utt, depth_cache, set()
                                     ),
-                "score":            score_by_utt.get(utt_id),
+                "score":             score_by_utt.get(utt_id),
                 "num_direct_replies": direct_reply_counts.get(utt_id, 0),
+                "controversiality":  controversiality_by_utt.get(utt_id),
+                "edited":            edited_by_utt.get(utt_id),
             })
             emitted_rows += 1
 
