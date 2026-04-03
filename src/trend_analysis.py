@@ -361,67 +361,91 @@ def plot_ols_trend_grid(
 
 
 # ----------------------------------------------------------------------------------------
-# Panel OLS with speaker fixed effects (within-estimator)
-# Model: y_it = β₀ + β₁·t + β₂·X_it + α_i + ε_it
+# Panel OLS with user, time, and subreddit fixed effects (3-way within-estimator)
+# Model: y_ist = β₁·F_it + β₂·X_ist + α_i + γ_t + δ_s + ε_ist
 # ----------------------------------------------------------------------------------------
 
-# Default controls — mirrors the X_it vector in the model specification.
-# 'num_utterances_by_speaker_month' serves as the speaker activity proxy.
+# Key explanatory variable — user activity frequency F_it
+PANEL_FREQ_COL = "num_utterances_by_speaker_month"
+
+# Default controls — X_ist vector (time-varying, excluding the frequency regressor)
 PANEL_CONTROLS = [
     "post_depth",
     "score",
     "num_direct_replies",
-    "num_utterances_by_speaker_month",
 ]
 
 PANEL_CONTROL_LABELS = {
-    "post_depth":                      "Post Depth",
-    "score":                           "Score",
-    "num_direct_replies":              "Direct Replies",
-    "num_utterances_by_speaker_month": "Speaker Activity",
+    "post_depth":         "Post Depth",
+    "score":              "Score",
+    "num_direct_replies": "Direct Replies",
 }
 
 # Short names used for output column suffixes
 _CONTROL_SHORT = {
-    "post_depth":                      "post_depth",
-    "score":                           "score",
-    "num_direct_replies":              "direct_replies",
-    "num_utterances_by_speaker_month": "speaker_activity",
+    "post_depth":         "post_depth",
+    "score":              "score",
+    "num_direct_replies": "direct_replies",
 }
 
+PANEL_CONCLUSIONS = [
+    "positive effect",
+    "negative effect",
+    "no significant effect",
+    "insufficient data",
+]
 
-def _prepare_panel(
+
+def _absorb_3way_fe(
     df: pd.DataFrame,
-    subreddit: str,
-    subreddit_col: str,
-    speaker_col: str,
-    time_col: str,
-    min_speaker_obs: int,
+    cols: list,
+    fe1_col: str,
+    fe2_col: str,
+    fe3_col: str,
+    tol: float = 1e-8,
+    max_iter: int = 50,
 ) -> pd.DataFrame:
-    """Filter and prepare the speaker-month panel for one subreddit.
+    """Iterative demeaning (Gauss-Seidel) to absorb three sets of fixed effects.
 
-    lexical_master.csv already contains exactly one row per speaker per month
-    (the longest post), so no aggregation is required. This function:
-      1. Filters to the target subreddit.
-      2. Computes t = months since each speaker's first post (exact, using
-         year × 12 + month arithmetic rather than timedelta approximation).
-      3. Drops speakers with fewer than min_speaker_obs monthly observations.
+    Alternately subtracts group means for each fixed effect in turn until
+    convergence (max absolute change < tol). Typically converges in < 10 passes
+    for three fixed effects.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Source DataFrame containing the FE identifier columns.
+    cols : list of str
+        Variable columns to demean (outcome + regressors).
+    fe1_col, fe2_col, fe3_col : str
+        Column names for the three fixed-effect dimensions.
+    tol : float
+        Convergence tolerance on max absolute change (default 1e-8).
+    max_iter : int
+        Maximum number of full Gauss-Seidel passes (default 50).
+
+    Returns
+    -------
+    pd.DataFrame
+        Residualized (demeaned) values for each column in cols.
     """
-    panel = df[df[subreddit_col] == subreddit].copy()
-
-    # Exact relative time: t = 0 at each speaker's first observed month
-    dt = pd.to_datetime(panel[time_col].astype(str), format="%Y-%m")
-    panel["_ym_int"] = dt.dt.year * 12 + dt.dt.month
-    panel["t"] = panel.groupby(speaker_col)["_ym_int"].transform(
-        lambda x: x - x.min()
-    )
-    panel = panel.drop(columns=["_ym_int"])
-
-    # Keep only speakers with sufficient longitudinal observations
-    obs_counts = panel.groupby(speaker_col)[time_col].transform("count")
-    panel = panel[obs_counts >= min_speaker_obs].reset_index(drop=True)
-
-    return panel
+    result = df[cols].copy().astype(float)
+    fe_index = {
+        fe1_col: df[fe1_col].values,
+        fe2_col: df[fe2_col].values,
+        fe3_col: df[fe3_col].values,
+    }
+    for _ in range(max_iter):
+        old = result.copy()
+        for fe_col, fe_vals in fe_index.items():
+            tmp = result.copy()
+            tmp[fe_col + "_fe_key_"] = fe_vals
+            group_means = tmp.groupby(fe_col + "_fe_key_")[cols].transform("mean")
+            result = result - group_means
+        delta = (result - old).abs().max().max()
+        if delta < tol:
+            break
+    return result
 
 
 def run_panel_ols(
@@ -430,43 +454,52 @@ def run_panel_ols(
     subreddit_col: str = "subreddit",
     speaker_col: str = "speaker_id",
     time_col: str = "year_month",
+    freq_col: str = PANEL_FREQ_COL,
     controls: Optional[Sequence[str]] = None,
     alpha: float = 0.05,
     min_speaker_obs: int = 3,
+    hac_maxlags: Optional[int] = _NW_AUTO,
 ) -> pd.DataFrame:
-    """Fit a panel OLS regression with speaker fixed effects (within-estimator).
+    """Fit panel OLS with user, time, and subreddit fixed effects; HAC standard errors.
 
-    Model (estimated separately for each subreddit × metric pair):
+    Model (estimated jointly across all subreddits, separately per metric):
 
-        y_it = β₀ + β₁·t + β₂·X_it + α_i + ε_it
+        y_ist = β₁·F_it + β₂·X_ist + α_i + γ_t + δ_s + ε_ist
 
     where
-      i   = speaker (entity index)
-      t   = months since speaker's first post in this subreddit (0, 1, 2, …)
-      X_it = [post_depth, score, num_direct_replies, speaker_activity]_it
-      α_i = speaker fixed effect (absorbed via within-transformation)
+      i    = user (speaker) index
+      s    = subreddit index
+      t    = calendar time (year-month)
+      F_it = user activity frequency — key explanatory variable
+             (num_utterances_by_speaker_month, or log-transformed)
+      X_ist = [post_depth, score, num_direct_replies]_ist — time-varying controls
+      α_i  = user fixed effects, capturing time-invariant user-level heterogeneity
+              in writing ability (absorbed via within-transformation)
+      γ_t  = time fixed effects, capturing platform-wide temporal shocks and
+              trends in language use (absorbed via within-transformation)
+      δ_s  = subreddit fixed effects, capturing persistent differences in
+              linguistic norms across communities (absorbed via within-transformation)
+      ε_ist = idiosyncratic error, E[ε|F,X,α,γ,δ] = 0 assumed
 
-    Implementation — within-estimator (entity demeaning):
-      All variables are demeaned by speaker (y_it − ȳ_i, t_it − t̄_i, etc.)
-      before OLS is run without an intercept. This is algebraically equivalent
-      to including N − 1 speaker dummies but avoids forming them explicitly,
-      which would be infeasible with millions of speakers.
+    Implementation — 3-way within-estimator (iterative demeaning):
+      All variables (outcome and regressors) are iteratively demeaned by user,
+      calendar time period, and subreddit (Gauss-Seidel alternating projections)
+      until convergence. OLS is then run on the fully residualised variables
+      without an intercept. This is algebraically equivalent to including the
+      full set of user, time, and subreddit dummies but avoids forming them
+      explicitly, which is infeasible with millions of users.
 
-    Standard errors are clustered at the speaker level to account for serial
-    dependence within speakers across months.
-
-    Note on degrees of freedom: statsmodels computes residual DOF as
-    N·T − K, where K = number of regressors. The correct within-estimator DOF
-    is N·T − N − K (accounting for the N absorbed fixed effects). With the
-    speaker counts in this dataset the difference is negligible for inference.
+    Standard errors are Newey-West HAC (heteroskedasticity- and autocorrelation-
+    consistent). Observations are sorted by (speaker, time) before the HAC
+    estimator is applied so that the lag structure aligns with the within-speaker
+    time ordering.
 
     Parameters
     ----------
     df : pd.DataFrame
-        DataFrame produced by clean_and_prepare_lexical_df(). lexical_master.csv
-        already contains one row per speaker per month (longest post), so no
-        internal aggregation is performed. Must contain speaker_col, subreddit_col,
-        time_col (as 'YYYY-MM' strings), the metric columns, and the control columns.
+        DataFrame produced by clean_and_prepare_lexical_df(). Must contain
+        speaker_col, subreddit_col, time_col (as 'YYYY-MM' strings), freq_col,
+        the metric columns, and the control columns.
     metrics : sequence of str, optional
         Dependent variables to model. Defaults to LEXICAL_METRICS.
     subreddit_col : str
@@ -475,36 +508,46 @@ def run_panel_ols(
         Column identifying the speaker / entity (default 'speaker_id').
     time_col : str
         Column containing year-month strings, e.g. '2015-03' (default 'year_month').
+    freq_col : str
+        Column containing user activity frequency F_it
+        (default 'num_utterances_by_speaker_month').
     controls : sequence of str, optional
-        Control columns to include as X_it. Defaults to PANEL_CONTROLS:
-        [post_depth, score, num_direct_replies, num_utterances_by_speaker_month].
-        Any control absent from df is silently dropped from the model.
+        Control columns X_ist. Defaults to PANEL_CONTROLS:
+        [post_depth, score, num_direct_replies]. Any control absent from df is
+        silently dropped from the model.
     alpha : float
-        Significance level for the trend coefficient β₁ (default 0.05).
+        Significance level for the key coefficient β₁ (default 0.05).
     min_speaker_obs : int
-        Minimum number of monthly observations required per speaker to be
-        included in the regression (default 3). Speakers with fewer months
-        contribute no within-speaker variation and are uninformative for FE
-        estimation.
+        Minimum monthly observations required per speaker (default 3). Speakers
+        with fewer observations contribute no within-speaker variation and are
+        dropped before estimation.
+    hac_maxlags : int or None
+        Newey-West lag truncation. None (default) triggers automatic selection
+        via the rule of thumb floor(4·(T/100)^(2/9)).
 
     Returns
     -------
     pd.DataFrame
-        One row per (subreddit, metric) with columns:
-          subreddit, metric, n_obs, n_speakers,
-          beta_1, se_beta_1, t_stat, p_value, ci_lower, ci_upper,
+        One row per metric with columns:
+          metric, n_obs, n_users, n_subreddits, n_time_periods,
+          beta_F, se_F, t_stat, p_value, ci_lower, ci_upper,
           beta_{c}, se_{c}  for each active control c (short name),
-          r_squared_within,
+          r_squared_within, hac_lags,
           significant, conclusion
     """
     if metrics is None:
         metrics = list(LEXICAL_METRICS)
     if controls is None:
-        controls = PANEL_CONTROLS
+        controls = list(PANEL_CONTROLS)
 
     for col in (subreddit_col, speaker_col, time_col):
         if col not in df.columns:
             raise ValueError(f"Missing required column: '{col}'")
+    if freq_col not in df.columns:
+        raise ValueError(
+            f"Missing frequency column: '{freq_col}'. "
+            "Set freq_col= to the appropriate column name."
+        )
 
     missing_metrics = [m for m in metrics if m not in df.columns]
     if missing_metrics:
@@ -512,104 +555,132 @@ def run_panel_ols(
 
     # Silently drop controls not present in df
     active_controls = [c for c in controls if c in df.columns]
-    reg_vars = ["t"] + active_controls   # regression variable order
 
-    subreddits = sorted(df[subreddit_col].dropna().unique())
+    # Drop speakers with insufficient longitudinal observations globally
+    obs_counts = df.groupby(speaker_col)[time_col].transform("count")
+    panel_all = df[obs_counts >= min_speaker_obs].copy()
+
     records = []
 
-    for subreddit in subreddits:
+    for metric in metrics:
+        needed = [metric, freq_col] + active_controls
+        available = [c for c in needed if c in panel_all.columns]
+        id_cols   = [speaker_col, subreddit_col, time_col]
 
-        # Prepare panel once per subreddit (filter, compute t, enforce min_speaker_obs)
-        panel_base = _prepare_panel(
-            df, subreddit, subreddit_col, speaker_col, time_col, min_speaker_obs,
+        panel = (
+            panel_all[available + id_cols]
+            .dropna(subset=available)
+            .sort_values([speaker_col, time_col])
+            .reset_index(drop=True)
         )
 
-        for metric in metrics:
-            needed = [metric] + reg_vars
-            available = [c for c in needed if c in panel_base.columns]
-            panel = panel_base[available + [speaker_col]].dropna(subset=available)
+        n_obs        = len(panel)
+        n_users      = panel[speaker_col].nunique()
+        n_subreddits = panel[subreddit_col].nunique()
+        n_time       = panel[time_col].nunique()
 
-            n_obs      = len(panel)
-            n_speakers = panel[speaker_col].nunique()
+        # Build the insufficient-data sentinel record
+        insufficient_record = dict(
+            metric=metric,
+            n_obs=n_obs, n_users=n_users,
+            n_subreddits=n_subreddits, n_time_periods=n_time,
+            beta_F=np.nan, se_F=np.nan,
+            t_stat=np.nan, p_value=np.nan,
+            ci_lower=np.nan, ci_upper=np.nan,
+            r_squared_within=np.nan, hac_lags=np.nan,
+            significant=np.nan, conclusion="insufficient data",
+        )
+        for c in active_controls:
+            short = _CONTROL_SHORT.get(c, c)
+            insufficient_record[f"beta_{short}"] = np.nan
+            insufficient_record[f"se_{short}"]   = np.nan
 
-            insufficient_record = dict(
-                subreddit=subreddit, metric=metric,
-                n_obs=n_obs, n_speakers=n_speakers,
-                beta_1=np.nan, se_beta_1=np.nan,
-                t_stat=np.nan, p_value=np.nan,
-                ci_lower=np.nan, ci_upper=np.nan,
-                r_squared_within=np.nan,
-                significant=np.nan, conclusion="insufficient data",
+        if n_obs < 10 or n_users < 2 or n_subreddits < 2:
+            records.append(insufficient_record)
+            continue
+
+        # Regressor order: [F_it, ctrl1, ctrl2, …]
+        reg_vars = [freq_col] + [c for c in active_controls if c in available]
+
+        # --- 3-way within-transformation (user × time × subreddit) ---
+        all_vars = [metric] + reg_vars
+        dm = _absorb_3way_fe(
+            panel, all_vars,
+            fe1_col=speaker_col,
+            fe2_col=time_col,
+            fe3_col=subreddit_col,
+        )
+
+        y_dm = dm[metric].values
+        X_dm = dm[reg_vars].values   # shape (n_obs, 1 + n_controls)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res = sm.OLS(y_dm, X_dm).fit(
+                cov_type="HAC",
+                cov_kwds={"maxlags": hac_maxlags, "use_correction": True},
             )
-            for c in active_controls:
-                short = _CONTROL_SHORT.get(c, c)
-                insufficient_record[f"beta_{short}"] = np.nan
-                insufficient_record[f"se_{short}"]   = np.nan
 
-            if n_obs < 10 or n_speakers < 2:
-                records.append(insufficient_record)
+        # β_F is the first regressor (F_it — user activity frequency)
+        beta_F   = float(res.params[0])
+        se_F     = float(res.bse[0])
+        t_stat   = float(res.tvalues[0])
+        p_value  = float(res.pvalues[0])
+        ci       = res.conf_int(alpha=alpha)
+        ci_lower = float(ci[0][0])
+        ci_upper = float(ci[1][0])
+
+        # Retrieve actual HAC lag order used
+        try:
+            hac_lags = int(
+                hac_maxlags
+                if hac_maxlags is not None
+                else np.floor(4 * (n_obs / 100) ** (2 / 9))
+            )
+        except Exception:
+            hac_lags = np.nan
+
+        # Within R²: share of within-entity variance explained
+        ss_res    = float(np.sum(res.resid ** 2))
+        ss_tot    = float(np.sum(y_dm ** 2))
+        r2_within = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
+
+        significant = p_value < alpha
+        if not significant:
+            conclusion = "no significant effect"
+        elif beta_F > 0:
+            conclusion = "positive effect"
+        else:
+            conclusion = "negative effect"
+
+        record = dict(
+            metric=metric,
+            n_obs=n_obs,
+            n_users=n_users,
+            n_subreddits=n_subreddits,
+            n_time_periods=n_time,
+            beta_F=round(beta_F, 6),
+            se_F=round(se_F, 6),
+            t_stat=round(t_stat, 4),
+            p_value=round(p_value, 6),
+            ci_lower=round(ci_lower, 6),
+            ci_upper=round(ci_upper, 6),
+            r_squared_within=round(r2_within, 4),
+            hac_lags=hac_lags,
+            significant=significant,
+            conclusion=conclusion,
+        )
+
+        # Control coefficients (β₂ vector)
+        for c in active_controls:
+            if c not in reg_vars:
                 continue
+            short     = _CONTROL_SHORT.get(c, c)
+            param_idx = reg_vars.index(c)
+            record[f"beta_{short}"] = round(float(res.params[param_idx]), 6)
+            record[f"se_{short}"]   = round(float(res.bse[param_idx]),    6)
 
-            # --- Within-transformation (entity demeaning) ---
-            entity_means = panel.groupby(speaker_col)[available].transform("mean")
-            dm = panel[available] - entity_means   # demeaned
-
-            y_dm = dm[metric].values
-            X_dm = dm[reg_vars].values    # [t_dm, ctrl1_dm, ctrl2_dm, …]
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                res = sm.OLS(y_dm, X_dm).fit(
-                    cov_type="cluster",
-                    cov_kwds={"groups": panel[speaker_col].values},
-                )
-
-            # β₁ is the first regressor (t_dm)
-            beta_1    = float(res.params[0])
-            se_beta_1 = float(res.bse[0])
-            t_stat    = float(res.tvalues[0])
-            p_value   = float(res.pvalues[0])
-            ci        = res.conf_int(alpha=alpha)
-            ci_lower  = float(ci[0][0])
-            ci_upper  = float(ci[1][0])
-
-            # Within R²: proportion of within-entity variance explained
-            ss_res  = float(np.sum(res.resid ** 2))
-            ss_tot  = float(np.sum(y_dm ** 2))   # total demeaned variance
-            r2_within = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
-
-            significant = p_value < alpha
-            if not significant:
-                conclusion = "no significant trend"
-            elif beta_1 > 0:
-                conclusion = "upward trend"
-            else:
-                conclusion = "downward trend"
-
-            record = dict(
-                subreddit=subreddit,
-                metric=metric,
-                n_obs=n_obs,
-                n_speakers=n_speakers,
-                beta_1=round(beta_1, 6),
-                se_beta_1=round(se_beta_1, 6),
-                t_stat=round(t_stat, 4),
-                p_value=round(p_value, 6),
-                ci_lower=round(ci_lower, 6),
-                ci_upper=round(ci_upper, 6),
-                r_squared_within=round(r2_within, 4),
-                significant=significant,
-                conclusion=conclusion,
-            )
-
-            # Control coefficients (β₂ vector)
-            for k, c in enumerate(active_controls):
-                short = _CONTROL_SHORT.get(c, c)
-                param_idx = k + 1   # index 0 is β₁ (t)
-                record[f"beta_{short}"] = round(float(res.params[param_idx]), 6)
-                record[f"se_{short}"]   = round(float(res.bse[param_idx]),   6)
-
-            records.append(record)
+        records.append(record)
 
     # Build ordered column list
     control_cols = []
@@ -618,10 +689,10 @@ def run_panel_ols(
         control_cols += [f"beta_{short}", f"se_{short}"]
 
     RESULT_COLS = (
-        ["subreddit", "metric", "n_obs", "n_speakers",
-         "beta_1", "se_beta_1", "t_stat", "p_value", "ci_lower", "ci_upper"]
+        ["metric", "n_obs", "n_users", "n_subreddits", "n_time_periods",
+         "beta_F", "se_F", "t_stat", "p_value", "ci_lower", "ci_upper"]
         + control_cols
-        + ["r_squared_within", "significant", "conclusion"]
+        + ["r_squared_within", "hac_lags", "significant", "conclusion"]
     )
     if not records:
         return pd.DataFrame(columns=RESULT_COLS)
@@ -633,10 +704,10 @@ def run_panel_ols(
 # ----------------------------------------------------------------------------------------
 
 def summarize_panel_ols(results: pd.DataFrame) -> None:
-    """Print a plain-text summary of panel OLS regression results.
+    """Print a plain-text summary of panel OLS results (3-way FE, HAC SEs).
 
-    Shows conclusion counts, per-metric β₁ estimates with clustered SEs,
-    β₂ (control) significant coefficients, and overall breakdown.
+    Shows overall conclusion counts, per-metric β_F (activity frequency effect)
+    with Newey-West standard errors, and significant β₂ control coefficients.
 
     Parameters
     ----------
@@ -651,102 +722,98 @@ def summarize_panel_ols(results: pd.DataFrame) -> None:
     total  = len(results)
     counts = results["conclusion"].value_counts()
 
-    print("=== Panel OLS Summary (Speaker FE · Clustered SEs) ===")
-    print("Model: y_it = β₀ + β₁·t + β₂·X_it + α_i + ε_it\n")
-    print(f"Total (subreddit × metric) series: {total}")
+    print("=== Panel OLS Summary (User FE · Time FE · Subreddit FE · HAC SEs) ===")
+    print("Model: y_ist = β₁·F_it + β₂·X_ist + α_i + γ_t + δ_s + ε_ist\n")
+    print(f"Total metrics estimated: {total}")
 
-    if "n_obs" in results.columns and "n_speakers" in results.columns:
+    if "n_obs" in results.columns:
         total_obs = results["n_obs"].sum()
-        total_spk = results.groupby("subreddit")["n_speakers"].first().sum()
-        print(f"Total speaker-month observations : {total_obs:,}")
-        print(f"Total unique speakers            : {total_spk:,}\n")
+        print(f"Total user-subreddit-month observations: {total_obs:,}")
+    if "n_users" in results.columns:
+        total_users = results["n_users"].max()
+        print(f"Unique users (max across metrics)       : {total_users:,}")
+    if "n_subreddits" in results.columns:
+        total_sr = results["n_subreddits"].max()
+        print(f"Subreddits                              : {total_sr}")
+    if "n_time_periods" in results.columns:
+        total_tp = results["n_time_periods"].max()
+        print(f"Calendar time periods                   : {total_tp}")
 
+    print()
     print("Overall conclusions:")
-    for conclusion in TREND_CONCLUSIONS:
+    for conclusion in PANEL_CONCLUSIONS:
         count = counts.get(conclusion, 0)
         pct = 100 * count / total if total > 0 else 0.0
         print(f"  {conclusion:<28} {count:>4}  ({pct:.1f}%)")
 
     # -----------------------------
-    # β1 (time trend) by metric
+    # β_F (activity frequency) per metric
     # -----------------------------
-    print("\nBreakdown by metric (β₁ = monthly trend, t in speaker-relative months):")
+    print("\nβ₁ (F_it — user activity frequency effect) by metric:")
     for metric in LEXICAL_METRICS:
-        sub = results[results["metric"] == metric]
-        if sub.empty:
+        row = results[results["metric"] == metric]
+        if row.empty:
+            continue
+        row = row.iloc[0]
+        label = METRIC_LABELS.get(metric, metric)
+
+        if pd.isna(row.get("beta_F", np.nan)):
+            print(f"  {label:<18} →  insufficient data")
             continue
 
-        label = METRIC_LABELS.get(metric, metric)
-        sig   = sub[sub["significant"] == True]
-
-        if sig.empty:
-            print(f"  {label:<18} →  no significant trends")
-        else:
-            parts = []
-            for _, row in sig.iterrows():
-                direction = "↑" if row["beta_1"] > 0 else "↓"
-                parts.append(
-                    f"{str(row['subreddit']).replace('subreddit-', 'r/')}: "
-                    f"{direction} β₁={row['beta_1']:+.6f} "
-                    f"(SE={row['se_beta_1']:.6f}, p={row['p_value']:.4f})"
-                )
-            print(f"  {label:<18} →  " + ";  ".join(parts))
+        direction = "↑" if row["beta_F"] > 0 else "↓"
+        sig_marker = "*" if row["significant"] else ""
+        hac_info = (
+            f", HAC lags={int(row['hac_lags'])}"
+            if "hac_lags" in results.columns and not pd.isna(row["hac_lags"])
+            else ""
+        )
+        print(
+            f"  {label:<18} →  {direction} β_F={row['beta_F']:+.6f} "
+            f"(SE={row['se_F']:.6f}, t={row['t_stat']:.4f}, "
+            f"p={row['p_value']:.4f}{hac_info}){sig_marker}  "
+            f"[{row['conclusion']}]"
+        )
 
     # -----------------------------
-    # β2 (X_it effect) significant
+    # β₂ (X_ist control) effects
     # -----------------------------
-    print("\nSignificant β₂ effects (X_it controls):")
+    print("\nβ₂ effects (X_ist time-varying controls):")
 
-    # Detect control beta columns dynamically (anything starting with "beta_"
-    # other than "beta_1", which is the time trend).
+    # Detect control beta columns dynamically (starts with "beta_", excludes "beta_F")
     control_beta_cols = [
         c for c in results.columns
-        if c.startswith("beta_") and c != "beta_1"
+        if c.startswith("beta_") and c != "beta_F"
     ]
 
     if not control_beta_cols:
-        print("  β₂ column not found in results.")
+        print("  No control columns found in results.")
         return
 
-    any_sig = False
-
     for metric in LEXICAL_METRICS:
-        sub = results[results["metric"] == metric]
-        if sub.empty:
+        row = results[results["metric"] == metric]
+        if row.empty:
             continue
-
+        row = row.iloc[0]
         label = METRIC_LABELS.get(metric, metric)
-        # Use overall significance flag as the filter (no separate per-control p-value stored).
-        sig2 = sub[sub["significant"] == True]
 
-        if sig2.empty:
-            continue
+        ctrl_parts = []
+        for beta_col in control_beta_cols:
+            val = row.get(beta_col, float("nan"))
+            if val != val:   # NaN check
+                continue
+            short  = beta_col[len("beta_"):]
+            se_col = f"se_{short}"
+            se_val = row.get(se_col, float("nan"))
+            direction = "↑" if val > 0 else "↓"
+            ctrl_parts.append(
+                f"{short}: {direction} β₂={val:+.6f} (SE={se_val:.6f})"
+            )
 
-        metric_parts = []
-        for _, row in sig2.iterrows():
-            sr = str(row["subreddit"]).replace("subreddit-", "r/")
-            for beta_col in control_beta_cols:
-                val = row.get(beta_col, float("nan"))
-                if val != val:   # NaN check
-                    continue
-                short = beta_col[len("beta_"):]   # strip "beta_" prefix
-                se_col = f"se_{short}"
-                se_val = row.get(se_col, float("nan"))
-                direction = "↑" if val > 0 else "↓"
-                metric_parts.append(
-                    f"{sr} [{short}]: "
-                    f"{direction} β₂={val:+.6f} "
-                    f"(SE={se_val:.6f})"
-                )
-
-        if not metric_parts:
-            continue
-
-        any_sig = True
-        print(f"  {label:<18} →  " + ";  ".join(metric_parts))
-
-    if not any_sig:
-        print("  no significant β₂ effects")
+        if ctrl_parts:
+            print(f"  {label:<18} →  " + ";  ".join(ctrl_parts))
+        else:
+            print(f"  {label:<18} →  no control estimates available")
 
 
 # ----------------------------------------------------------------------------------------
@@ -758,87 +825,93 @@ def plot_panel_coef(
     metrics: Optional[Sequence[str]] = None,
     save_path: Optional["str | Path"] = None,
 ) -> None:
-    """Coefficient plot (dot-and-whisker) of β₁ across subreddits and metrics.
+    """Coefficient plot (dot-and-whisker) of β_F across metrics.
 
-    Each panel shows one metric. Points are the β₁ estimates; horizontal bars
-    are 95 % confidence intervals. Filled markers indicate significance at
-    α = 0.05; hollow markers indicate non-significance. A vertical reference
-    line at β₁ = 0 aids interpretation.
+    Displays a single forest-plot panel with one row per metric. The point
+    estimate is β_F (activity frequency effect); horizontal bars are 95 %
+    confidence intervals. Filled markers indicate significance at α = 0.05;
+    hollow markers indicate non-significance. A vertical reference line at
+    β_F = 0 aids interpretation.
 
     Parameters
     ----------
     results : pd.DataFrame
         Output of run_panel_ols().
     metrics : sequence of str, optional
-        Metrics to include. Defaults to all metrics present in results.
+        Metrics to include. Defaults to all metrics present in results in the
+        canonical LEXICAL_METRICS order.
     save_path : str or Path, optional
         If provided, saves the figure instead of displaying it.
     """
     if metrics is None:
         metrics = [m for m in LEXICAL_METRICS if m in results["metric"].values]
 
-    subreddits = sorted(results["subreddit"].dropna().unique())
-    n_metrics  = len(metrics)
-    n_cols     = 2
-    n_rows     = int(np.ceil(n_metrics / n_cols))
+    n_metrics = len(metrics)
+    if n_metrics == 0:
+        print("No metrics to plot.")
+        return
 
-    palette   = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    color_map = {s: palette[i % len(palette)] for i, s in enumerate(subreddits)}
+    palette = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
-    fig, axes = plt.subplots(n_rows, n_cols,
-                             figsize=(7 * n_cols, 3.0 * n_rows),
-                             constrained_layout=True)
-    axes_flat = np.array(axes).flatten()
+    fig, ax = plt.subplots(figsize=(8, max(3, 1.0 * n_metrics)),
+                           constrained_layout=True)
 
-    y_positions = np.arange(len(subreddits))
+    y_positions = np.arange(n_metrics)
 
-    for ax_idx, metric in enumerate(metrics):
-        ax    = axes_flat[ax_idx]
-        label = METRIC_LABELS.get(metric, metric)
-        sub   = results[results["metric"] == metric]
+    for y_pos, metric in enumerate(metrics):
+        row = results[results["metric"] == metric]
+        if row.empty or pd.isna(row["beta_F"].values[0]):
+            # Draw a hollow grey marker to indicate missing data
+            ax.plot(0, y_pos, "o", color="white",
+                    markeredgecolor="#aaaaaa", markeredgewidth=1.2,
+                    markersize=8, zorder=3)
+            continue
 
-        for y_pos, subreddit in enumerate(subreddits):
-            row = sub[sub["subreddit"] == subreddit]
-            if row.empty or pd.isna(row["beta_1"].values[0]):
-                continue
+        beta_F   = row["beta_F"].values[0]
+        ci_lower = row["ci_lower"].values[0]
+        ci_upper = row["ci_upper"].values[0]
+        sig      = bool(row["significant"].values[0])
+        color    = palette[y_pos % len(palette)]
+        label    = METRIC_LABELS.get(metric, metric)
 
-            beta_1   = row["beta_1"].values[0]
-            ci_lower = row["ci_lower"].values[0]
-            ci_upper = row["ci_upper"].values[0]
-            sig      = bool(row["significant"].values[0])
-            color    = color_map[subreddit]
-            short    = str(subreddit).replace("subreddit-", "r/")
+        # Confidence interval bar
+        ax.plot([ci_lower, ci_upper], [y_pos, y_pos],
+                color=color, linewidth=2.0, zorder=2)
 
-            # Confidence interval bar
-            ax.plot([ci_lower, ci_upper], [y_pos, y_pos],
-                    color=color, linewidth=1.8, zorder=2)
-            # Point estimate — filled if significant, hollow if not
-            marker_kwargs = dict(
-                color=color if sig else "white",
-                markeredgecolor=color,
-                markeredgewidth=1.5,
-                markersize=9,
-                zorder=3,
-            )
-            ax.plot(beta_1, y_pos, "o", **marker_kwargs,
-                    label=f"{short}{'*' if sig else ''}")
-
-        ax.axvline(0, color="#333333", linewidth=0.8, linestyle="--", zorder=1)
-        ax.set_yticks(y_positions)
-        ax.set_yticklabels(
-            [str(s).replace("subreddit-", "r/") for s in subreddits], fontsize=9
+        # Point estimate — filled if significant, hollow if not
+        ax.plot(
+            beta_F, y_pos, "o",
+            color=color if sig else "white",
+            markeredgecolor=color,
+            markeredgewidth=1.8,
+            markersize=10,
+            zorder=3,
+            label=f"{label}  β_F={beta_F:+.5f}{'*' if sig else ''}",
         )
-        ax.set_xlabel("β₁  (change per speaker-month)", fontsize=8)
-        ax.set_title(label, fontsize=11, fontweight="bold")
-        ax.tick_params(axis="x", labelsize=8)
 
-    for ax in axes_flat[n_metrics:]:
-        ax.set_visible(False)
+        # Annotate p-value to the right of the CI bar
+        p_val = row["p_value"].values[0]
+        ax.annotate(
+            f"p={p_val:.3f}{'*' if sig else ''}",
+            xy=(ci_upper, y_pos),
+            xytext=(4, 0), textcoords="offset points",
+            fontsize=7.5, va="center",
+        )
+
+    ax.axvline(0, color="#333333", linewidth=0.9, linestyle="--", zorder=1)
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(
+        [METRIC_LABELS.get(m, m) for m in metrics], fontsize=10
+    )
+    ax.set_xlabel("β_F  (effect of user activity frequency F_it)", fontsize=9)
+    ax.tick_params(axis="x", labelsize=8)
+    ax.invert_yaxis()   # top-to-bottom ordering matches table layout
 
     fig.suptitle(
-        "Panel OLS — β₁ Coefficient Plot  (Speaker FE · Clustered SEs)\n"
+        "Panel OLS — β_F Coefficient Plot\n"
+        "Model: y_ist = β₁·F_it + β₂·X_ist + α_i + γ_t + δ_s  (HAC SEs)\n"
         "Filled = significant at α=0.05 · Hollow = not significant",
-        fontsize=12, fontweight="bold", y=1.01,
+        fontsize=11, fontweight="bold",
     )
 
     if save_path is not None:
