@@ -697,7 +697,14 @@ def summarize_panel_ols(results: pd.DataFrame) -> None:
     # -----------------------------
     print("\nSignificant β₂ effects (X_it controls):")
 
-    if "beta_2" not in results.columns:
+    # Detect control beta columns dynamically (anything starting with "beta_"
+    # other than "beta_1", which is the time trend).
+    control_beta_cols = [
+        c for c in results.columns
+        if c.startswith("beta_") and c != "beta_1"
+    ]
+
+    if not control_beta_cols:
         print("  β₂ column not found in results.")
         return
 
@@ -709,28 +716,34 @@ def summarize_panel_ols(results: pd.DataFrame) -> None:
             continue
 
         label = METRIC_LABELS.get(metric, metric)
-        sig2  = sub[sub["significant_beta_2"] == True] if "significant_beta_2" in sub.columns else sub[sub["significant"] == True]
-
-        # If you distinguish significance separately for β2, prefer that column.
-        sig2 = sub[sub["significant_beta_2"] == True] if "significant_beta_2" in sub.columns else sub[sub["significant"] == True]
-
-        sig2 = sig2[sig2["beta_2"].notna()] if "beta_2" in sub.columns else sig2
+        # Use overall significance flag as the filter (no separate per-control p-value stored).
+        sig2 = sub[sub["significant"] == True]
 
         if sig2.empty:
             continue
 
-        any_sig = True
-        parts = []
+        metric_parts = []
         for _, row in sig2.iterrows():
-            direction = "↑" if row["beta_2"] > 0 else "↓"
-            parts.append(
-                f"{str(row['subreddit']).replace('subreddit-', 'r/')}: "
-                f"{direction} β₂={row['beta_2']:+.6f} "
-                f"(SE={row.get('se_beta_2', float('nan')):.6f}, "
-                f"p={row.get('p_beta_2', float('nan')):.4f})"
-            )
+            sr = str(row["subreddit"]).replace("subreddit-", "r/")
+            for beta_col in control_beta_cols:
+                val = row.get(beta_col, float("nan"))
+                if val != val:   # NaN check
+                    continue
+                short = beta_col[len("beta_"):]   # strip "beta_" prefix
+                se_col = f"se_{short}"
+                se_val = row.get(se_col, float("nan"))
+                direction = "↑" if val > 0 else "↓"
+                metric_parts.append(
+                    f"{sr} [{short}]: "
+                    f"{direction} β₂={val:+.6f} "
+                    f"(SE={se_val:.6f})"
+                )
 
-        print(f"  {label:<18} →  " + ";  ".join(parts))
+        if not metric_parts:
+            continue
+
+        any_sig = True
+        print(f"  {label:<18} →  " + ";  ".join(metric_parts))
 
     if not any_sig:
         print("  no significant β₂ effects")
