@@ -6,20 +6,23 @@ pipeline into a single regression-ready file.
 
 Transformations applied
 -----------------------
-1.  edited → binary int
+1.  raw_text is dropped — not needed for any regression and can be large.
+
+2.  Known bot / automated accounts are removed using the speaker_id
+        blocklist in bot_usernames.csv (same directory as this script).
+
+3.  edited → binary int
         "False" / False / 0  →  0
         any Unix timestamp   →  1
 
-2.  timestamp → datetime (UTC), then:
+4.  timestamp → datetime (UTC), then:
         year_month  (Period string, e.g. "2015-01") — used as the time
                     fixed effect γ_t in the panel regression and the
                     groupby key for the baseline OLS aggregation
 
-3.  log_freq_month = log1p(num_utterances_by_speaker_month)
+5.  log_freq_month = log1p(num_utterances_by_speaker_month)
         This is F_ut in the fixed-effects panel regression and the
         building block of F̄_u in the cross-user WLS regression.
-
-4.  raw_text is dropped — not needed for any regression and can be large.
 
 Output
 ------
@@ -63,6 +66,11 @@ DEFAULT_INPUT_DIR = "/scratch/network/nv9344/Thesis/Thesis-Data/ArcticShift"
 # Where to write lexical_df_combined.csv (defaults to same directory).
 DEFAULT_OUTPUT_DIR = DEFAULT_INPUT_DIR
 
+# CSV listing known bot / automated accounts to exclude from the combined output.
+# Each row must have a 'username' column matching speaker_id values in the data.
+# Path is resolved relative to this script file so it works from any working directory.
+BOT_USERNAMES_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_usernames.csv")
+
 # Expected subreddit file stems — used to warn if any are missing.
 EXPECTED_STEMS = ["College", "Parenting", "Retirement", "Teenagers"]
 
@@ -80,6 +88,25 @@ OUTPUT_COLUMNS = [
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _load_bot_usernames(csv_path: str) -> set:
+    """Load the set of known-bot speaker IDs from *csv_path*.
+
+    The file must have a header row with at least a 'username' column.
+    Returns an empty set (with a warning) if the file is missing or malformed,
+    so the pipeline can still run without the filter applied.
+    """
+    if not os.path.isfile(csv_path):
+        print(f"WARNING: bot_usernames.csv not found at {csv_path}. Bot filtering skipped.")
+        return set()
+    try:
+        bot_df = pd.read_csv(csv_path, usecols=["username"], dtype=str)
+        bots = set(bot_df["username"].dropna().str.strip())
+        return bots
+    except Exception as exc:
+        print(f"WARNING: could not load bot usernames from {csv_path}: {exc}. Bot filtering skipped.")
+        return set()
+
 
 def _edited_to_binary(series: pd.Series) -> pd.Series:
     """Convert the raw 'edited' column to a 0/1 integer.
@@ -167,12 +194,25 @@ def main() -> None:
         df.drop(columns=["raw_text"], inplace=True)
 
     # ------------------------------------------------------------------
-    # 3. edited → binary
+    # 3. Remove known bot / automated accounts
+    # ------------------------------------------------------------------
+    bot_usernames = _load_bot_usernames(BOT_USERNAMES_CSV)
+    if bot_usernames:
+        before = len(df)
+        df = df[~df["speaker_id"].isin(bot_usernames)].copy()
+        removed = before - len(df)
+        print(f"Bot filter: removed {removed:,} rows from {len(bot_usernames):,} known-bot accounts "
+              f"({removed / before * 100:.2f}% of combined data).")
+    else:
+        print("Bot filter: no bot usernames loaded — skipping.")
+
+    # ------------------------------------------------------------------
+    # 5. edited → binary
     # ------------------------------------------------------------------
     df["edited"] = _edited_to_binary(df["edited"])
 
     # ------------------------------------------------------------------
-    # 4. timestamp → datetime, then year_month
+    # 6. timestamp → datetime, then year_month
     # ------------------------------------------------------------------
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
 
@@ -183,12 +223,12 @@ def main() -> None:
     df["year_month"] = df["timestamp"].dt.to_period("M").astype(str)
 
     # ------------------------------------------------------------------
-    # 5. log_freq_month  (F_ut = log(1 + num_utterances_by_speaker_month))
+    # 7. log_freq_month  (F_ut = log(1 + num_utterances_by_speaker_month))
     # ------------------------------------------------------------------
     df["log_freq_month"] = np.log1p(df["num_utterances_by_speaker_month"])
 
     # ------------------------------------------------------------------
-    # 6. Reorder columns and write output
+    # 8. Reorder columns and write output
     # ------------------------------------------------------------------
     # Keep only columns that exist in this dataframe (guards against schema drift)
     cols_out = [c for c in OUTPUT_COLUMNS if c in df.columns]
