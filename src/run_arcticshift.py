@@ -67,7 +67,7 @@ from arcticshift_pipeline import run_lexical_pipeline_arcticshift_batches  # noq
 # ---------------------------------------------------------------------------
 
 # Ordered list of ArcticShift subreddit folder names.
-SUBREDDITS = ["College", "Parenting", "Retirement", "Teenagers"]
+SUBREDDITS = ["College", "High School", "Parenting", "Retirement", "Teenagers"]
 
 # Base directory containing the subreddit folders on Adroit.
 DEFAULT_DATA_DIR = "/scratch/network/nv9344/Thesis/Thesis-Data/ArcticShift"
