@@ -1036,6 +1036,7 @@ def run_mixed_effects(
         return pd.DataFrame(columns=RESULT_COLS)
 
     out = pd.DataFrame(records, columns=RESULT_COLS)
+    out["significant"] = out["significant"].astype(object)
     valid = out["p_value"].notna()
 
     if apply_bh and valid.any():
