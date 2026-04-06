@@ -1077,6 +1077,9 @@ def _apply_significance(
     """
     valid = out[p_col].notna()
 
+    # Cast to object so pandas 2.x allows mixed NaN/bool assignment
+    out["significant"] = out["significant"].astype(object)
+
     if apply_bh and valid.any():
         adj = _bh_adjust(out.loc[valid, p_col].values)
         out.loc[valid, "p_value_bh"] = np.round(adj, 6)
