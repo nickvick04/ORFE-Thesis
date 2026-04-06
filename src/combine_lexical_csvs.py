@@ -82,7 +82,7 @@ DEFAULT_OUTPUT_DIR = DEFAULT_INPUT_DIR
 BOT_USERNAMES_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_usernames.csv")
 
 # Expected subreddit file stems — used to warn if any are missing.
-EXPECTED_STEMS = ["College", "Parenting", "Retirement", "Teenagers"]
+EXPECTED_STEMS = ["College", "High School", "Parenting", "Retirement", "Teenagers"]
 
 # Final column order for the output CSV.
 OUTPUT_COLUMNS = [
