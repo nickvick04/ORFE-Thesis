@@ -11,16 +11,26 @@ Transformations applied
 2.  Known bot / automated accounts are removed using the speaker_id
         blocklist in bot_usernames.csv (same directory as this script).
 
-3.  edited → binary int
+3.  Zero MTLD and MATTR scores are replaced with NaN.
+        Both metrics are undefined for utterances shorter than their
+        minimum token threshold (roughly 50 tokens for MTLD; one window
+        width for MATTR). The lexical pipeline writes 0.0 for these
+        sub-threshold cases rather than NaN, so they must be nullified
+        here before any aggregation. Leaving zeros in would bias monthly
+        means downward in proportion to the share of short posts, and
+        would cause short-text users to appear lexically impoverished in
+        the cross-user and panel regressions.
+
+4.  edited → binary int
         "False" / False / 0  →  0
         any Unix timestamp   →  1
 
-4.  timestamp → datetime (UTC), then:
+5.  timestamp → datetime (UTC), then:
         year_month  (Period string, e.g. "2015-01") — used as the time
                     fixed effect γ_t in the panel regression and the
                     groupby key for the baseline OLS aggregation
 
-5.  log_freq_month = log1p(num_utterances_by_speaker_month)
+6.  log_freq_month = log1p(num_utterances_by_speaker_month)
         This is F_ut in the fixed-effects panel regression and the
         building block of F̄_u in the cross-user WLS regression.
 
@@ -207,12 +217,28 @@ def main() -> None:
         print("Bot filter: no bot usernames loaded — skipping.")
 
     # ------------------------------------------------------------------
+    # 4. Zero MTLD / MATTR scores → NaN
+    #    The lexical pipeline writes 0.0 for utterances too short to score
+    #    (below the minimum token threshold for each metric). These are not
+    #    valid measurements and must be treated as missing before any
+    #    aggregation or regression. MATTR blanks already arrive as NaN from
+    #    the pipeline; this step makes MTLD consistent with that behaviour.
+    # ------------------------------------------------------------------
+    for col in ("mtld_score", "mattr_score"):
+        if col in df.columns:
+            n_zeros = (df[col] == 0.0).sum()
+            if n_zeros > 0:
+                df[col] = df[col].replace(0.0, np.nan)
+                print(f"Zero-score filter ({col}): replaced {n_zeros:,} zeros with NaN "
+                      f"({n_zeros / len(df) * 100:.2f}% of rows).")
+
+    # ------------------------------------------------------------------
     # 5. edited → binary
     # ------------------------------------------------------------------
     df["edited"] = _edited_to_binary(df["edited"])
 
     # ------------------------------------------------------------------
-    # 6. timestamp → datetime, then year_month
+    # 6. timestamp → datetime (UTC), then year_month
     # ------------------------------------------------------------------
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
 
@@ -223,7 +249,7 @@ def main() -> None:
     df["year_month"] = df["timestamp"].dt.to_period("M").astype(str)
 
     # ------------------------------------------------------------------
-    # 7. log_freq_month  (F_ut = log(1 + num_utterances_by_speaker_month))
+    # 7. log_freq_month (F_ut = log(1 + num_utterances_by_speaker_month))
     # ------------------------------------------------------------------
     df["log_freq_month"] = np.log1p(df["num_utterances_by_speaker_month"])
 
