@@ -41,7 +41,7 @@ Author: Nicholas Vickery, Princeton ORFE '26
 """
 
 import warnings
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Union
 
 import numpy as np
 import pandas as pd
@@ -168,7 +168,7 @@ def _bh_adjust(p_values: np.ndarray) -> np.ndarray:
     return result
 
 
-def _get_hac_lags(res, n: int) -> int | float:
+def _get_hac_lags(res, n: int) -> Union[int, float]:
     """Best-effort retrieval of the HAC lag order actually used."""
     try:
         lags = res.model.data.cov_kwds.get("maxlags")
