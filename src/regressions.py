@@ -672,14 +672,23 @@ def run_cross_user_wls(
                 ci_upper=round(float(ci[1, 1]), 6),
                 r_squared=round(float(res.rsquared), 4),
                 significant=np.nan, conclusion="",
+                # β₂ control coefficients (X̄_u vector), one column per control
+                **{f"beta2_{c}": round(float(res.params[i + 2]), 6)
+                   for i, c in enumerate(avail_controls)},
+                **{f"se_beta2_{c}": round(float(res.bse[i + 2]), 6)
+                   for i, c in enumerate(avail_controls)},
             ))
 
+    ctrl_beta_cols = (
+        [f"beta2_{c}" for c in avail_controls]
+        + [f"se_beta2_{c}" for c in avail_controls]
+    )
     RESULT_COLS = [
         "subreddit", "metric", "n_users",
         "beta_0", "beta_1", "se_beta_1", "t_stat", "p_value",
         "ci_lower", "ci_upper", "r_squared",
         "significant", "conclusion",
-    ]
+    ] + ctrl_beta_cols
     if not records:
         return pd.DataFrame(columns=RESULT_COLS)
 
@@ -856,14 +865,25 @@ def run_fixed_effects_panel(
             ci_upper=round(float(ci.loc[freq_col, "upper"]), 6),
             r_squared_within=round(r_sq_w, 4) if not np.isnan(r_sq_w) else np.nan,
             significant=np.nan, conclusion="",
+            # β₂ control coefficients (X_ust vector), one column per control
+            **{f"beta2_{c}": round(float(res.params[c]), 6)
+               if c in res.params.index else np.nan
+               for c in avail_controls},
+            **{f"se_beta2_{c}": round(float(res.std_errors[c]), 6)
+               if c in res.std_errors.index else np.nan
+               for c in avail_controls},
         ))
 
+    ctrl_beta_cols = (
+        [f"beta2_{c}" for c in avail_controls]
+        + [f"se_beta2_{c}" for c in avail_controls]
+    )
     RESULT_COLS = [
         "metric", "n_obs", "n_users", "n_periods",
         "beta_1", "se_beta_1", "t_stat", "p_value",
         "ci_lower", "ci_upper", "r_squared_within",
         "significant", "conclusion",
-    ]
+    ] + ctrl_beta_cols
     if not records:
         return pd.DataFrame(columns=RESULT_COLS)
 
@@ -1028,6 +1048,18 @@ def run_mixed_effects(
         else:
             beta_1 = se_beta_1 = np.nan
 
+        # β₂ control coefficients (X_ust vector) — same for every subreddit row
+        ctrl_beta = {
+            f"beta2_{c}": round(float(res.params[c]), 6)
+            if c in res.params.index else np.nan
+            for c in avail_controls
+        }
+        ctrl_se = {
+            f"se_beta2_{c}": round(float(res.bse[c]), 6)
+            if c in res.bse.index else np.nan
+            for c in avail_controls
+        }
+
         for sub in subreddits_all:
             if sub == reference_sub:
                 continue
@@ -1051,15 +1083,21 @@ def run_mixed_effects(
                 ci_upper=round(float(ci.loc[param_name, 1]), 6),
                 log_likelihood=log_lik,
                 significant=np.nan, conclusion="",
+                **ctrl_beta,
+                **ctrl_se,
             ))
 
+    ctrl_beta_cols = (
+        [f"beta2_{c}" for c in avail_controls]
+        + [f"se_beta2_{c}" for c in avail_controls]
+    )
     RESULT_COLS = [
         "metric", "subreddit", "reference_subreddit", "n_obs", "n_users",
         "beta_1", "se_beta_1",
         "delta", "se_delta", "z_stat", "p_value",
         "ci_lower", "ci_upper", "log_likelihood",
         "significant", "conclusion",
-    ]
+    ] + ctrl_beta_cols
     if not records:
         return pd.DataFrame(columns=RESULT_COLS)
 
