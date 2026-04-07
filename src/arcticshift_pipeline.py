@@ -110,6 +110,8 @@ def _extract_arcticshift_parent_id(obj: dict):
     raw = obj.get("parent_id")
     if not raw:
         return None
+    if not isinstance(raw, str):
+        return None
     if "_" in raw:
         prefix, bare_id = raw.split("_", 1)
         if prefix == "t1":
