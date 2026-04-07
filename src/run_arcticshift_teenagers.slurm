@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=256G              # Elevated: Pass 1 dicts hold all ~127M comments in memory (~80-120GB dict overhead alone)
-#SBATCH --time=12:00:00                 # ~1.5h for 2 file passes + up to ~10h lexical (1/3 of speakers)
+#SBATCH --time=20:00:00                 # ~1.5h for 2 file passes + up to ~17h lexical (1/3 of speakers per shard)
 #SBATCH --mail-type=begin,end,fail
 #SBATCH --mail-user=nv9344@princeton.edu
 #SBATCH --output=/scratch/network/nv9344/Thesis/logs/%x_%A_%a.out
