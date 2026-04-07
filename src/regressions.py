@@ -885,23 +885,28 @@ def run_mixed_effects(
     metrics: Optional[Sequence[str]] = None,
     subreddit_col: str = "subreddit",
     speaker_col: str = "speaker_id",
+    time_col: str = "year_month",
+    freq_col: str = "log_freq_month",
     controls: Optional[Sequence[str]] = None,
     alpha: float = 0.05,
     min_obs: int = 50,
     apply_bh: bool = True,
 ) -> pd.DataFrame:
-    """Cross-subreddit mixed-effects comparison model (§4.7).
+    """Cross-subreddit mixed-effects comparison model (§6.3).
 
     Fits the model
 
-        y_ust = Σ_s δ_s · 1[subreddit = s] + β · X_ust + α_u + ε_ust
+        y_ust = Σ_s θ_s · 1[subreddit = s] + β_1·F_ut + β_2·X_ust + a_u + γ_t + ε_ust
 
-    where δ_s are subreddit fixed effects capturing the conditional mean
+    where θ_s are subreddit fixed effects capturing the conditional mean
     difference in lexical quality for subreddit s relative to a reference
-    community (the first subreddit alphabetically), and α_u ~ N(0, σ²_u) is
-    a user-level random intercept estimated by REML.
+    community (the first subreddit alphabetically), β_1 is the activity effect
+    coefficient on log monthly post frequency F_ut, β_2·X_ust are the
+    time-varying control variables, γ_t are time fixed effects (month dummies)
+    absorbing platform-wide shocks common to all users in a given month, and
+    a_u ~ N(0, σ²_u) is a user-level random intercept estimated by REML.
 
-    Unlike the fixed effects panel model (§4.6) where user FE absorbs all
+    Unlike the fixed effects panel model (§6.2) where user FE absorbs all
     between-user and between-subreddit variation, the random intercept here
     allows for cross-subreddit comparisons while still controlling for
     persistent user heterogeneity.
@@ -916,10 +921,14 @@ def run_mixed_effects(
         Column identifying the community (default 'subreddit').
     speaker_col : str
         Grouping column for user random intercepts (default 'speaker_id').
+    time_col : str
+        Column for time period used to build γ_t month dummies (default 'year_month').
+    freq_col : str
+        Key explanatory variable F_ut: log monthly post count (default 'log_freq_month').
     controls : sequence of str, optional
-        Fixed-effect covariates β · X_ust. Defaults to CONTROLS.
+        Fixed-effect covariates β_2 · X_ust. Defaults to CONTROLS.
     alpha : float
-        Significance level for the δ_s coefficients (default 0.05).
+        Significance level for the θ_s coefficients (default 0.05).
     min_obs : int
         Minimum observations required to fit (default 50).
     apply_bh : bool
@@ -931,6 +940,7 @@ def run_mixed_effects(
         One row per (metric, subreddit) — one per non-reference subreddit —
         with columns:
         metric, subreddit, reference_subreddit, n_obs, n_users,
+        beta_1, se_beta_1,
         delta, se_delta, z_stat, p_value, [p_value_bh,]
         ci_lower, ci_upper, log_likelihood,
         significant, conclusion.
@@ -943,7 +953,7 @@ def run_mixed_effects(
     avail_controls = [c for c in controls if c in df.columns]
     _require_columns(
         df,
-        [speaker_col, subreddit_col] + list(metrics),
+        [speaker_col, subreddit_col, time_col, freq_col] + list(metrics),
         "run_mixed_effects",
     )
 
@@ -953,7 +963,7 @@ def run_mixed_effects(
     records = []
 
     for metric in metrics:
-        cols = [speaker_col, subreddit_col, metric] + avail_controls
+        cols = [speaker_col, subreddit_col, time_col, freq_col, metric] + avail_controls
         mdf = df[cols].dropna().copy().reset_index(drop=True)
         n_obs   = len(mdf)
         n_users = mdf[speaker_col].nunique()
@@ -965,7 +975,7 @@ def run_mixed_effects(
                 ))
             continue
 
-        # Subreddit dummies: drop the reference category so the intercept
+        # Subreddit dummies (θ_s): drop the reference category so the intercept
         # represents the reference subreddit's mean.
         sub_dummies = pd.get_dummies(
             mdf[subreddit_col], prefix="sub", drop_first=False
@@ -975,8 +985,17 @@ def run_mixed_effects(
             sub_dummies = sub_dummies.drop(columns=[ref_col])
         sub_dummy_cols = sub_dummies.columns.tolist()
 
-        mdf = pd.concat([mdf, sub_dummies], axis=1)
-        exog_cols = sub_dummy_cols + avail_controls
+        # Time dummies (γ_t): drop one period to avoid the dummy trap.
+        time_dummies = pd.get_dummies(
+            mdf[time_col], prefix="time", drop_first=True
+        ).astype(float)
+        time_dummy_cols = time_dummies.columns.tolist()
+
+        mdf = pd.concat([mdf, sub_dummies, time_dummies], axis=1)
+
+        # exog order: subreddit dummies, freq (β_1·F_ut), controls (β_2·X_ust),
+        # time dummies (γ_t)
+        exog_cols = sub_dummy_cols + [freq_col] + avail_controls + time_dummy_cols
         exog = sm.add_constant(mdf[exog_cols], has_constant="add")
 
         with warnings.catch_warnings():
@@ -1002,6 +1021,13 @@ def run_mixed_effects(
         log_lik = round(float(res.llf), 4) if hasattr(res, "llf") else np.nan
         ci = res.conf_int(alpha=alpha)
 
+        # β_1 coefficient on F_ut (same for every subreddit row of this metric)
+        if freq_col in res.params.index:
+            beta_1    = round(float(res.params[freq_col]), 6)
+            se_beta_1 = round(float(res.bse[freq_col]), 6)
+        else:
+            beta_1 = se_beta_1 = np.nan
+
         for sub in subreddits_all:
             if sub == reference_sub:
                 continue
@@ -1016,6 +1042,7 @@ def run_mixed_effects(
                 metric=metric, subreddit=sub,
                 reference_subreddit=reference_sub,
                 n_obs=n_obs, n_users=n_users,
+                beta_1=beta_1, se_beta_1=se_beta_1,
                 delta=round(float(res.params[param_name]), 6),
                 se_delta=round(float(res.bse[param_name]), 6),
                 z_stat=round(float(res.tvalues[param_name]), 4),
@@ -1028,6 +1055,7 @@ def run_mixed_effects(
 
     RESULT_COLS = [
         "metric", "subreddit", "reference_subreddit", "n_obs", "n_users",
+        "beta_1", "se_beta_1",
         "delta", "se_delta", "z_stat", "p_value",
         "ci_lower", "ci_upper", "log_likelihood",
         "significant", "conclusion",
@@ -1111,6 +1139,7 @@ def _missing_mixed_row(
         metric=metric, subreddit=subreddit,
         reference_subreddit=reference_subreddit,
         n_obs=n_obs, n_users=n_users,
+        beta_1=np.nan, se_beta_1=np.nan,
         delta=np.nan, se_delta=np.nan,
         z_stat=np.nan, p_value=np.nan,
         ci_lower=np.nan, ci_upper=np.nan,
