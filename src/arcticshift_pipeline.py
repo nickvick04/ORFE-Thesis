@@ -6,11 +6,14 @@
 # Code Author: Nicholas Vickery, Princeton ORFE '26
 # ----------------------------------------------------------------------------------------
 
+import io
 import os
 import gc
 import json
 import pandas as pd
 from datetime import datetime
+
+import zstandard as zstd
 
 # Shared helpers from the existing preprocessing module.
 # BOT_TEXT_RE / HAS_LETTER_RE are the same compiled regexes used by the Convokit path.
@@ -36,18 +39,44 @@ _EXCLUDED_AUTHORS = {"[deleted]", "AutoModerator"}
 # ----------------------------------------------------------------------------------------
 
 def _find_arcticshift_jsonl(corpus_dir: str) -> str:
-    """Return the path of the single *_comments.jsonl file inside corpus_dir.
+    """Return the path of the single *_comments.jsonl(.zst) file inside corpus_dir.
 
-    ArcticShift exports one file per subreddit following the naming convention
-    r_<subreddit>_comments.jsonl.  Raises FileNotFoundError if none is found.
+    Accepts both the decompressed r_<subreddit>_comments.jsonl and the
+    compressed r_<subreddit>_comments.jsonl.zst (or bare _comments.zst).
+    The .jsonl form is preferred when both exist.  Raises FileNotFoundError
+    if neither is found.
     """
+    jsonl_path = None
+    zst_path   = None
     for fname in os.listdir(corpus_dir):
+        full = os.path.join(corpus_dir, fname)
         if fname.endswith("_comments.jsonl"):
-            return os.path.join(corpus_dir, fname)
+            jsonl_path = full
+        elif fname.endswith("_comments.jsonl.zst") or fname.endswith("_comments.zst"):
+            zst_path = full
+    if jsonl_path is not None:
+        return jsonl_path
+    if zst_path is not None:
+        return zst_path
     raise FileNotFoundError(
-        f"No *_comments.jsonl file found in {corpus_dir}. "
-        "Expected a file matching r_<subreddit>_comments.jsonl."
+        f"No *_comments.jsonl or *_comments.zst file found in {corpus_dir}. "
+        "Expected a file matching r_<subreddit>_comments.jsonl(.zst)."
     )
+
+
+def _open_jsonl(path: str):
+    """Return a text-mode file-like object for a .jsonl or .jsonl.zst/.zst file.
+
+    For compressed files the zstandard streaming decompressor is used so the
+    file is never fully materialised on disk.  The caller is responsible for
+    closing the returned object (use as a context manager).
+    """
+    if path.endswith(".zst"):
+        fh  = open(path, "rb")
+        dctx = zstd.ZstdDecompressor()
+        stream = dctx.stream_reader(fh)
+        return io.TextIOWrapper(stream, encoding="utf-8")
+    return open(path, "r", encoding="utf-8")
 
 
 def _extract_arcticshift_fields(obj: dict):
@@ -159,7 +188,7 @@ def arcticshift_longest_posts_batches(
     # ------------------------------------------------------------------
     # Pass 1 — scan the file to build the selection index
     # ------------------------------------------------------------------
-    with open(utt_path, "r", encoding="utf-8") as f:
+    with _open_jsonl(utt_path) as f:
         for line in f:
             if not line.strip():
                 continue
@@ -254,7 +283,7 @@ def arcticshift_longest_posts_batches(
     rows         = []
     emitted_rows = 0
 
-    with open(utt_path, "r", encoding="utf-8") as f:
+    with _open_jsonl(utt_path) as f:
         for line in f:
             if not line.strip():
                 continue
