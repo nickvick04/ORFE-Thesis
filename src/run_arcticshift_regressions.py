@@ -197,14 +197,14 @@ plot_ols_trend_grid(
 
 
 # ---------------------------------------------------------------------------
-# 2. First-Differenced OLS Regression
+# 2. First-Differenced Panel Regression
 # ---------------------------------------------------------------------------
-# Model: Δy_t = β₀ + ε_t
-# Drift model on first-differenced monthly series with HAC standard errors.
-# A significant β₀ (drift) with the same sign as β₁ from baseline OLS
-# provides convergent evidence of a genuine trend.
+# Model: Δy_{s,t} = c_s + ρ·Δy_{s,t-1} + ε_{s,t}
+# Panel FD regression with subreddit fixed effects (c_s) and a lagged
+# dependent variable (ρ) to capture persistence. Cluster-robust SEs.
+# c_s answers whether quality trends up/down; ρ answers whether changes persist.
 
-_banner("First-Differenced OLS Regression (§4.4.7)")
+_banner("First-Differenced Panel Regression (§4.4.7)")
 t0 = time.time()
 
 fd_results = run_first_diff_ols(
@@ -214,32 +214,41 @@ fd_results = run_first_diff_ols(
     apply_bh=APPLY_BH,
 )
 
-print("\n=== First-Differenced OLS — conclusion counts ===", flush=True)
+print("\n=== First-Differenced Panel — conclusion counts ===", flush=True)
 print(fd_results["conclusion"].value_counts().to_string(), flush=True)
 print(flush=True)
 
 sig_fd = fd_results[fd_results["significant"] == True].copy()
 print(f"Significant pairs: {len(sig_fd)} / {len(fd_results)}", flush=True)
 if len(sig_fd):
-    print(sig_fd[["subreddit", "metric", "drift", "se_drift", "p_value", "p_value_bh", "conclusion"]]
+    print(sig_fd[["subreddit", "metric", "c_s", "se_c_s", "p_value", "p_value_bh", "conclusion"]]
           .sort_values(["metric", "subreddit"])
           .to_string(index=False), flush=True)
 
-# Convergence check: compare signs with baseline OLS
+# ρ is common across subreddits within each metric — report once per metric.
+rho_summary = (
+    fd_results[fd_results["rho"].notna()]
+    .drop_duplicates(subset="metric")[["metric", "rho", "se_rho", "t_stat_rho", "p_value_rho"]]
+    .sort_values("metric")
+)
+print("\n=== First-Differenced Panel — ρ (persistence) per metric ===", flush=True)
+print(rho_summary.to_string(index=False), flush=True)
+
+# Convergence check: compare signs of c_s with β₁ from baseline OLS.
 merged = ols_results[["subreddit", "metric", "beta_1", "significant"]].rename(
     columns={"beta_1": "ols_beta1", "significant": "ols_sig"}
 ).merge(
-    fd_results[["subreddit", "metric", "drift", "significant"]].rename(
-        columns={"drift": "fd_drift", "significant": "fd_sig"}
+    fd_results[["subreddit", "metric", "c_s", "significant"]].rename(
+        columns={"c_s": "fd_c_s", "significant": "fd_sig"}
     ),
     on=["subreddit", "metric"],
 )
 merged["signs_agree"] = (
     merged["ols_beta1"].apply(lambda x: 1 if x > 0 else -1) ==
-    merged["fd_drift"].apply(lambda x: 1 if x > 0 else -1)
+    merged["fd_c_s"].apply(lambda x: 1 if x > 0 else -1)
 )
 print("\n=== OLS ↔ First-Diff sign convergence ===", flush=True)
-print(merged[["subreddit", "metric", "ols_beta1", "ols_sig", "fd_drift", "fd_sig", "signs_agree"]]
+print(merged[["subreddit", "metric", "ols_beta1", "ols_sig", "fd_c_s", "fd_sig", "signs_agree"]]
       .sort_values(["metric", "subreddit"])
       .to_string(index=False), flush=True)
 
@@ -288,7 +297,7 @@ convergence["all_agree"] = (
     (convergence["ols_beta1"].apply(lambda x: 1 if x > 0 else -1) ==
      convergence["ar_beta1"].apply(lambda x: 1 if x > 0 else -1))
 )
-print("\n=== Three-model sign convergence (OLS, FD, AR) ===", flush=True)
+print("\n=== Three-model sign convergence (OLS, FD Panel, AR) ===", flush=True)
 print(convergence[["subreddit", "metric", "ols_sig", "fd_sig", "ar_sig", "all_agree"]]
       .sort_values(["all_agree", "metric", "subreddit"], ascending=[False, True, True])
       .to_string(index=False), flush=True)

@@ -310,7 +310,7 @@ def run_baseline_ols(
 
 
 # ---------------------------------------------------------------------------
-# 2. First-Differenced OLS Regression  (§4.4.7)
+# 2. First-Differenced Panel Regression  (§4.4.7)
 # ---------------------------------------------------------------------------
 
 def run_first_diff_ols(
@@ -319,43 +319,68 @@ def run_first_diff_ols(
     subreddit_col: str = "subreddit",
     time_col: str = "year_month",
     alpha: float = 0.05,
-    hac_maxlags: Optional[int] = _NW_AUTO,
     min_obs: int = 10,
     apply_bh: bool = True,
 ) -> pd.DataFrame:
-    """First-differenced OLS regression (§4.4.7).
+    """First-differenced panel regression with lagged dependent variable (§4.4.7).
 
-    Fits the drift model
+    Fits the model
 
-        Δy_t = β₀ + ε_t
+        Δy_{s,t} = c_s + ρ·Δy_{s,t-1} + ε_{s,t}
 
-    where Δy_t = y_t − y_{t-1} is the month-over-month change in the metric.
-    β₀ (the drift) captures the average directional change per month. When β₀
-    shares the same sign as β₁ from the baseline levels regression, this
-    corroborates the existence of a genuine trend, since both the level and the
-    increments trend in the same direction.
+    where Δy_{s,t} = y_{s,t} − y_{s,t-1} is the month-over-month change in the
+    metric for subreddit s. c_s is a subreddit-specific intercept (fixed effect)
+    capturing the average monthly change in lexical quality for that community,
+    and ρ measures persistence in metric changes across all subreddits.
 
-    Newey-West HAC standard errors are applied to guard against residual serial
-    correlation in the differenced series.
+    Because the metric values are first-differenced, this specification
+    significantly reduces the effect of unit-root behaviour in the underlying
+    time series; the lagged dependent variable term accounts for residual
+    autocorrelation in the differenced series.
 
-    Note on specification: equation (11) in the methodology writes
-    Δy_t = β₀ + β₁ + ε_t, which reduces to a single drift constant. This
-    function estimates that constant as β₀ and reports it as `drift`.
+    The model is estimated as a pooled OLS panel with subreddit fixed effects
+    (implemented via subreddit dummy variables, one per community with no
+    dropped reference — there is no separate intercept). Standard errors are
+    cluster-robust, clustered by subreddit to account for within-community
+    serial correlation.
+
+    This model answers two questions robustly:
+    (1) Is there a systematic trend in lexical quality over time?  → look at c_s.
+        A significant positive c_s indicates improving quality in subreddit s;
+        a significant negative c_s indicates declining quality.
+    (2) Are observed changes persistent?  → look at ρ.
+        A significant positive ρ indicates that changes persist across months;
+        a significant negative ρ indicates that changes are temporary and
+        metric levels soon revert to a baseline.
 
     Parameters
     ----------
     df : pd.DataFrame
         Utterance-level combined CSV from combine_lexical_csvs.py.
-    metrics, subreddit_col, time_col, alpha, hac_maxlags, min_obs, apply_bh
-        As in run_baseline_ols.
+    metrics : sequence of str, optional
+        Metric columns to model. Defaults to all six LEXICAL_METRICS.
+    subreddit_col : str
+        Column identifying the community (default 'subreddit').
+    time_col : str
+        Column containing year-month strings, e.g. '2015-03' (default 'year_month').
+    alpha : float
+        Significance level for c_s (default 0.05).
+    min_obs : int
+        Minimum number of (Δy_{s,t}, Δy_{s,t-1}) pairs required per subreddit
+        to include it in the panel (default 10). Subreddits with fewer pairs
+        are excluded from the joint estimation and returned as 'insufficient data'.
+    apply_bh : bool
+        If True (default), append BH-adjusted p-values across all
+        (subreddit, metric) pairs to correct for multiple comparisons.
 
     Returns
     -------
     pd.DataFrame
         One row per (subreddit, metric) with columns:
         subreddit, metric, n_obs,
-        drift, se_drift, t_stat, p_value, [p_value_bh,]
-        ci_lower, ci_upper, hac_lags, r_squared,
+        c_s, se_c_s, t_stat_cs, p_value, [p_value_bh,]
+        rho, se_rho, t_stat_rho, p_value_rho,
+        r_squared,
         significant, conclusion.
     """
     if metrics is None:
@@ -365,60 +390,117 @@ def run_first_diff_ols(
     subreddits = sorted(agg[subreddit_col].dropna().unique())
     records = []
 
-    for subreddit in subreddits:
-        for metric in metrics:
-            series = _extract_series(agg, subreddit, metric, subreddit_col, time_col)
-            n = len(series)
+    for metric in metrics:
+        # Build the panel of (Δy_{s,t}, Δy_{s,t-1}) pairs across all subreddits.
+        dy_curr_list: list[float] = []
+        dy_lag_list:  list[float] = []
+        sub_list:     list[str]   = []
+        skipped:      list[str]   = []
+        included:     list[str]   = []
 
-            if n < min_obs + 1:          # need at least min_obs differences
-                records.append(dict(
-                    subreddit=subreddit, metric=metric, n_obs=max(0, n - 1),
-                    drift=np.nan, se_drift=np.nan,
-                    t_stat=np.nan, p_value=np.nan,
-                    ci_lower=np.nan, ci_upper=np.nan,
-                    hac_lags=np.nan, r_squared=np.nan,
-                    significant=np.nan, conclusion="insufficient data",
-                ))
+        for subreddit in subreddits:
+            series = _extract_series(agg, subreddit, metric, subreddit_col, time_col)
+            dy = series.diff().dropna()         # Δy_{s,t}, length T-1
+            dy_lag = dy.shift(1).dropna()       # Δy_{s,t-1}, length T-2
+            dy_aligned = dy.iloc[1:]            # Δy_{s,t} aligned with lag
+
+            if len(dy_aligned) < min_obs:
+                skipped.append(subreddit)
                 continue
 
-            dy = series.diff().dropna().values.astype(float)
-            n_diff = len(dy)
-            X = sm.add_constant(np.ones(n_diff), has_constant="add")
+            included.append(subreddit)
+            n_pairs = len(dy_aligned)
+            dy_curr_list.extend(dy_aligned.tolist())
+            dy_lag_list.extend(dy_lag.tolist())
+            sub_list.extend([subreddit] * n_pairs)
 
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                res = sm.OLS(dy, X).fit(
-                    cov_type="HAC",
-                    cov_kwds={"maxlags": hac_maxlags},
-                )
+        if not included:
+            # All subreddits had insufficient data — emit placeholder rows.
+            for subreddit in subreddits:
+                records.append(dict(
+                    subreddit=subreddit, metric=metric, n_obs=0,
+                    c_s=np.nan, se_c_s=np.nan, t_stat_cs=np.nan, p_value=np.nan,
+                    rho=np.nan, se_rho=np.nan, t_stat_rho=np.nan, p_value_rho=np.nan,
+                    r_squared=np.nan,
+                    significant=np.nan, conclusion="insufficient data",
+                ))
+            continue
 
-            ci = np.array(res.conf_int(alpha=alpha))
+        # Design matrix: subreddit fixed effects (one dummy per subreddit in
+        # `included`, no dropped category) followed by the lagged difference.
+        n_total = len(dy_curr_list)
+        n_subs  = len(included)
+        sub_idx = {s: i for i, s in enumerate(included)}
+
+        dummy_matrix = np.zeros((n_total, n_subs), dtype=float)
+        for row_i, sub in enumerate(sub_list):
+            dummy_matrix[row_i, sub_idx[sub]] = 1.0
+
+        dy_lag_arr = np.array(dy_lag_list, dtype=float).reshape(-1, 1)
+        X = np.hstack([dummy_matrix, dy_lag_arr])         # shape (N, n_subs + 1)
+        y = np.array(dy_curr_list, dtype=float)
+        groups = np.array(sub_list)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res = sm.OLS(y, X).fit(
+                cov_type="cluster",
+                cov_kwds={"groups": groups},
+            )
+
+        # ρ is the last coefficient (index n_subs).
+        rho_idx  = n_subs
+        rho      = float(res.params[rho_idx])
+        se_rho   = float(res.bse[rho_idx])
+        t_rho    = float(res.tvalues[rho_idx])
+        p_rho    = float(res.pvalues[rho_idx])
+        r2       = float(res.rsquared)
+
+        # Count observations per included subreddit.
+        sub_counts: dict[str, int] = {}
+        for sub in sub_list:
+            sub_counts[sub] = sub_counts.get(sub, 0) + 1
+
+        # Emit one result row per included subreddit.
+        for i, subreddit in enumerate(included):
             records.append(dict(
-                subreddit=subreddit, metric=metric, n_obs=n_diff,
-                drift=round(float(res.params[0]), 6),
-                se_drift=round(float(res.bse[0]), 6),
-                t_stat=round(float(res.tvalues[0]), 4),
-                p_value=round(float(res.pvalues[0]), 6),
-                ci_lower=round(float(ci[0, 0]), 6),
-                ci_upper=round(float(ci[0, 1]), 6),
-                hac_lags=_get_hac_lags(res, n_diff),
-                r_squared=round(float(res.rsquared), 4),
+                subreddit=subreddit, metric=metric, n_obs=sub_counts[subreddit],
+                c_s=round(float(res.params[i]), 6),
+                se_c_s=round(float(res.bse[i]), 6),
+                t_stat_cs=round(float(res.tvalues[i]), 4),
+                p_value=round(float(res.pvalues[i]), 6),
+                rho=round(rho, 6),
+                se_rho=round(se_rho, 6),
+                t_stat_rho=round(t_rho, 4),
+                p_value_rho=round(p_rho, 6),
+                r_squared=round(r2, 4),
                 significant=np.nan, conclusion="",
+            ))
+
+        # Emit placeholder rows for subreddits skipped due to insufficient data.
+        for subreddit in skipped:
+            records.append(dict(
+                subreddit=subreddit, metric=metric, n_obs=0,
+                c_s=np.nan, se_c_s=np.nan, t_stat_cs=np.nan, p_value=np.nan,
+                rho=np.nan, se_rho=np.nan, t_stat_rho=np.nan, p_value_rho=np.nan,
+                r_squared=np.nan,
+                significant=np.nan, conclusion="insufficient data",
             ))
 
     RESULT_COLS = [
         "subreddit", "metric", "n_obs",
-        "drift", "se_drift", "t_stat", "p_value",
-        "ci_lower", "ci_upper", "hac_lags", "r_squared",
+        "c_s", "se_c_s", "t_stat_cs", "p_value",
+        "rho", "se_rho", "t_stat_rho", "p_value_rho",
+        "r_squared",
         "significant", "conclusion",
     ]
     if not records:
         return pd.DataFrame(columns=RESULT_COLS)
 
     out = pd.DataFrame(records, columns=RESULT_COLS)
-    _apply_significance(out, p_col="p_value", beta_col="drift", alpha=alpha,
-                        apply_bh=apply_bh, up="positive drift",
-                        down="negative drift", null="no significant drift")
+    _apply_significance(out, p_col="p_value", beta_col="c_s", alpha=alpha,
+                        apply_bh=apply_bh, up="positive trend",
+                        down="negative trend", null="no significant trend")
     return out
 
 
