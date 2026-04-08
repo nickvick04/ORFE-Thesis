@@ -77,7 +77,16 @@ def _save_csv(df: pd.DataFrame, name: str) -> None:
 
 
 def _print_ctrl_coefs(results: pd.DataFrame, model_label: str) -> None:
-    """Print β₂ control coefficients from WLS, FE, or mixed-effects results."""
+    """Print β₂ control coefficients from WLS, FE, or mixed-effects results.
+
+    Three structural cases mirror the original notebook cells:
+      FE panel      — no 'subreddit' column; one row per metric.
+      Mixed-effects — 'subreddit' column present but β₂ is estimated jointly
+                      (same value for every subreddit row within a metric);
+                      deduplicate to one row per metric.
+      WLS           — 'subreddit' column present and β₂ varies per subreddit;
+                      show the full subreddit × metric table.
+    """
     ctrl_names = ["post_depth", "edited", "score", "num_direct_replies", "controversiality"]
     b2_cols  = [f"beta2_{c}"    for c in ctrl_names if f"beta2_{c}"    in results.columns]
     se_cols  = [f"se_beta2_{c}" for c in ctrl_names if f"se_beta2_{c}" in results.columns]
@@ -89,20 +98,35 @@ def _print_ctrl_coefs(results: pd.DataFrame, model_label: str) -> None:
 
     print(f"\n=== {model_label} — β₂ Control Coefficients ===\n", flush=True)
 
-    # Deduplicate if the β₂ is the same across subreddit rows (FE, mixed-effects)
-    dedup_col = "metric" if "subreddit" in results.columns else None
-    display_df = (
-        results[["metric"] + b2_cols + se_cols]
-        .drop_duplicates(subset="metric")
-        .rename(columns={f"beta2_{c}": c for c in avail}
-                        | {f"se_beta2_{c}": f"se_{c}" for c in avail})
-        .reset_index(drop=True)
-    ) if dedup_col == "metric" else (
-        results[["subreddit", "metric"] + b2_cols + se_cols]
-        .rename(columns={f"beta2_{c}": c for c in avail}
-                        | {f"se_beta2_{c}": f"se_{c}" for c in avail})
-        .sort_values(["metric", "subreddit"])
+    rename_map = (
+        {f"beta2_{c}": c for c in avail}
+        | {f"se_beta2_{c}": f"se_{c}" for c in avail}
     )
+
+    if "subreddit" not in results.columns:
+        # Fixed effects panel: one row per metric, no subreddit column.
+        display_df = (
+            results[["metric"] + b2_cols + se_cols]
+            .rename(columns=rename_map)
+            .reset_index(drop=True)
+        )
+    elif results.groupby("metric")[b2_cols[0]].nunique().le(1).all():
+        # Mixed-effects: β₂ is constant within each metric group (estimated
+        # jointly across subreddits). Deduplicate to one row per metric.
+        display_df = (
+            results[["metric"] + b2_cols + se_cols]
+            .drop_duplicates(subset="metric")
+            .rename(columns=rename_map)
+            .reset_index(drop=True)
+        )
+    else:
+        # Cross-user WLS: β₂ varies by subreddit. Show full table.
+        display_df = (
+            results[["subreddit", "metric"] + b2_cols + se_cols]
+            .rename(columns=rename_map)
+            .sort_values(["metric", "subreddit"])
+        )
+
     print(display_df.to_string(index=False), flush=True)
 
 
