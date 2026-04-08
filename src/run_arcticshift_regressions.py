@@ -30,6 +30,7 @@ from regressions import (
     run_mixed_effects,
     LEXICAL_METRICS,
 )
+from trend_analysis import plot_ols_trend_grid
 
 warnings.filterwarnings("ignore")
 pd.set_option("display.max_columns", None)
@@ -161,6 +162,14 @@ if len(sig):
 
 print(f"\n  Completed in {_elapsed(t0)}", flush=True)
 _save_csv(ols_results, "ols_results")
+
+# OLS trend grid plots (diversity + sophistication)
+agg = df.groupby(["subreddit", "year_month"])[METRICS].mean().reset_index()
+plot_ols_trend_grid(
+    agg,
+    ols_results,
+    save_path=os.path.join(OUTPUT_DIR, "ols_trend_grid.png"),
+)
 
 
 # ---------------------------------------------------------------------------
