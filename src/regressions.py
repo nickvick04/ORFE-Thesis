@@ -80,6 +80,13 @@ CONTROLS: list[str] = [
     "controversiality",
 ]
 
+# Metrics where a *higher* raw value corresponds to *lower* lexical quality.
+# Yule's K measures repetitiveness (higher K = less diverse vocabulary).
+# Zipf Score measures word frequency (higher score = more common/simple words).
+# Conclusions and quality labels are flipped for these metrics so that
+# "upward trend" / "positive effect" always means improving quality.
+INVERSE_METRICS: frozenset = frozenset({"yules_k", "zipf_score"})
+
 # Automatic Newey-West bandwidth: statsmodels rule-of-thumb when maxlags=None.
 _NW_AUTO: None = None
 
@@ -1117,7 +1124,12 @@ def run_mixed_effects(
             return row["conclusion"] if row["conclusion"] else "insufficient data"
         if not row["significant"]:
             return "no significant difference"
-        direction = "higher" if row["delta"] > 0 else "lower"
+        # For inverse metrics (Yule's K, Zipf), a positive delta in the raw
+        # metric means lower quality relative to the reference subreddit.
+        inverse = row["metric"] in INVERSE_METRICS
+        positive_delta = row["delta"] > 0
+        higher_quality = positive_delta ^ inverse  # XOR flips sense for inverse metrics
+        direction = "higher" if higher_quality else "lower"
         return f"{direction} quality than {row['reference_subreddit']}"
 
     out["conclusion"] = out.apply(_conclude_mixed, axis=1)
@@ -1159,7 +1171,12 @@ def _apply_significance(
             return row["conclusion"] if (row["conclusion"] and row["conclusion"] != "") else "insufficient data"
         if not row["significant"]:
             return null
-        return up if row[beta_col] > 0 else down
+        # For inverse metrics (Yule's K, Zipf), a positive coefficient means
+        # the raw value is rising but lexical quality is falling — so flip the
+        # direction labels so that conclusions always reflect quality direction.
+        inverse = ("metric" in row.index) and (row["metric"] in INVERSE_METRICS)
+        pos_label, neg_label = (down, up) if inverse else (up, down)
+        return pos_label if row[beta_col] > 0 else neg_label
 
     out["conclusion"] = out.apply(_conclude, axis=1)
 
