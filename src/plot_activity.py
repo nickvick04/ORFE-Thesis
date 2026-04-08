@@ -40,21 +40,21 @@ DEFAULT_OUT_DIR = "/scratch/network/nv9344/Thesis/Visualizations"
 
 # Display labels for subreddit CSV values
 SUBREDDIT_LABELS: dict[str, str] = {
-    "highschool": "r/highschool",
-    "college":    "r/college",
-    "Parenting":  "r/Parenting",
-    "retirement": "r/retirement",
+    "teenagers": "r/teenagers",
+    "college":   "r/college",
+    "Parenting": "r/parenting",
+    "retirement":"r/retirement",
 }
 
 # Plot order (youngest → oldest community, top to bottom in legend)
-SUBREDDIT_ORDER = ["highschool", "college", "Parenting", "retirement"]
+SUBREDDIT_ORDER = ["teenagers", "college", "Parenting", "retirement"]
 
 # Colorblind-friendly palette (Wong 2011), assigned youngest → oldest
 COLORS: dict[str, str] = {
-    "highschool": "#0072B2",   # blue
-    "college":    "#E69F00",   # amber
-    "Parenting":  "#009E73",   # teal-green
-    "retirement": "#D55E00",   # vermillion
+    "teenagers": "#0072B2",   # blue
+    "college":   "#E69F00",   # amber
+    "Parenting": "#009E73",   # teal-green
+    "retirement":"#D55E00",   # vermillion
 }
 
 # Drop months that are likely incomplete (the data extraction date).
