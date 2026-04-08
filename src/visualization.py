@@ -272,12 +272,12 @@ def plot_lexical_metrics(df, metrics=LEXICAL_METRICS, rolling_window=None, resam
         ylabel = METRIC_LABELS.get(col, col)
         if negate:
             ylabel = f'−{ylabel}'
-        axes[i].set_ylabel(ylabel)
+        axes[i].set_ylabel(ylabel, fontsize=14, fontweight='bold')
         axes[i].grid(True, alpha=0.3)
 
-    axes[-1].set_xlabel('Time')
+    axes[-1].set_xlabel('Time', fontsize=14, fontweight='bold')
     method_desc = label if (rolling_window or resample_freq) else 'raw'
-    fig.suptitle(f'Lexical Metrics Over Time ({method_desc})', fontsize=16)
+    fig.suptitle(f'Lexical Metrics Over Time ({method_desc})', fontsize=16, fontweight='bold')
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.show()
 
