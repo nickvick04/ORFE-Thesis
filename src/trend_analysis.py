@@ -261,11 +261,18 @@ def plot_ols_trend_grid(
     time_col: str = "year_month",
     save_path: Optional["str | Path"] = None,
 ) -> None:
-    """Plot each metric time series with its fitted OLS trend line overlaid.
+    """Plot OLS trend lines for lexical diversity and sophistication metrics.
 
-    Produces a grid of subplots — one per metric — with one line per subreddit.
-    Significant trend lines are drawn solid; non-significant trends are dashed.
-    The β₁ estimate and p-value are annotated in each panel.
+    Produces **two separate figures**, each with three subplots arranged in a
+    single row:
+
+    * **Figure 1 — Lexical Diversity**: MTLD, MATTR, Yule's K
+    * **Figure 2 — Lexical Sophistication**: Zipf Score, AoA, NAWL Ratio
+
+    Each subplot shows the monthly mean time series (faint) with the fitted
+    OLS trend line overlaid. Solid lines indicate a significant trend at
+    α = 0.05; dashed lines indicate non-significance. The β₁ estimate and
+    p-value are shown in each legend entry.
 
     Parameters
     ----------
@@ -274,90 +281,116 @@ def plot_ols_trend_grid(
     results : pd.DataFrame
         Output of run_ols_trend().
     metrics : sequence of str, optional
-        Metrics to plot. Defaults to LEXICAL_METRICS.
+        Metrics to plot. If provided, each metric is assigned to whichever
+        group it belongs to; metrics outside both groups are silently ignored.
+        Defaults to all six LEXICAL_METRICS.
     subreddit_col : str
         Column identifying the community (default 'subreddit').
     time_col : str
         Column containing year-month strings (default 'year_month').
     save_path : str or Path, optional
-        If provided, saves the figure instead of displaying it.
+        Base path for saving. If provided, two files are written by inserting
+        ``_diversity`` and ``_sophistication`` before the extension, e.g.
+        ``plot.png`` → ``plot_diversity.png`` and ``plot_sophistication.png``.
     """
+    _DIVERSITY      = ["mtld_score", "mattr_score", "yules_k"]
+    _SOPHISTICATION = ["zipf_score", "aoa_score",   "nawl_ratio"]
+
     if metrics is None:
-        metrics = LEXICAL_METRICS
+        div_metrics  = _DIVERSITY
+        soph_metrics = _SOPHISTICATION
+    else:
+        div_metrics  = [m for m in metrics if m in _DIVERSITY]
+        soph_metrics = [m for m in metrics if m in _SOPHISTICATION]
 
     subreddits = sorted(agg[subreddit_col].dropna().unique())
-    n_metrics  = len(metrics)
-    n_cols     = 2
-    n_rows     = int(np.ceil(n_metrics / n_cols))
+    palette    = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    color_map  = {s: palette[i % len(palette)] for i, s in enumerate(subreddits)}
 
-    palette = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    color_map = {s: palette[i % len(palette)] for i, s in enumerate(subreddits)}
-
-    fig, axes = plt.subplots(n_rows, n_cols,
-                             figsize=(7 * n_cols, 3.8 * n_rows),
-                             constrained_layout=True)
-    axes_flat = np.array(axes).flatten()
-
-    for ax_idx, metric in enumerate(metrics):
-        ax = axes_flat[ax_idx]
-        label = METRIC_LABELS.get(metric, metric)
-
-        for subreddit in subreddits:
-            series = _extract_series(agg, subreddit, metric, subreddit_col, time_col)
-            if series.empty:
-                continue
-
-            color = color_map[subreddit]
-            short = str(subreddit).replace("subreddit-", "r/")
-
-            # Plot raw monthly means
-            ax.plot(
-                series.index, series.values,
-                color=color, alpha=0.35, linewidth=1.0,
-            )
-
-            # Retrieve regression result for this pair
-            mask = (results["subreddit"] == subreddit) & (results["metric"] == metric)
-            row  = results[mask]
-            if row.empty or pd.isna(row["beta_1"].values[0]):
-                continue
-
-            b0   = row["beta_1"].values[0]  # slope
-            b0_i = row["beta_0"].values[0]  # intercept
-            pval = row["p_value"].values[0]
-            sig  = bool(row["significant"].values[0])
-
-            t  = np.arange(len(series), dtype=float)
-            y_hat = b0_i + b0 * t
-
-            linestyle = "-" if sig else "--"
-            ax.plot(
-                series.index, y_hat,
-                color=color, linewidth=2.0, linestyle=linestyle,
-                label=f"{short}  β₁={b0:+.4f}  p={pval:.3f}{'*' if sig else ''}",
-            )
-
-        ax.set_title(label, fontsize=11, fontweight="bold")
-        ax.set_xlabel("Month", fontsize=8)
-        ax.tick_params(axis="x", labelsize=7, rotation=30)
-        ax.tick_params(axis="y", labelsize=8)
-        ax.legend(fontsize=7.5, framealpha=0.85)
-
-    # Hide any unused subplot panels
-    for ax in axes_flat[n_metrics:]:
-        ax.set_visible(False)
-
-    fig.suptitle(
-        "OLS Trend Regression: y_t = β₀ + β₁·t + ε_t  (Newey-West HAC SEs)\n"
-        "Solid = significant at α=0.05 · Dashed = not significant",
-        fontsize=12, fontweight="bold", y=1.01,
-    )
-
+    # Derive save paths for each figure
     if save_path is not None:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
-        print(f"Plot saved to: {save_path}")
+        p         = Path(save_path)
+        div_path  = p.parent / (p.stem + "_diversity"      + p.suffix)
+        soph_path = p.parent / (p.stem + "_sophistication" + p.suffix)
     else:
-        plt.show()
+        div_path = soph_path = None
+
+    def _render_group(group_metrics: list, group_label: str, out_path) -> None:
+        """Render one 1×3 figure for a given metric group."""
+        if not group_metrics:
+            return
+
+        n_cols = len(group_metrics)
+        fig, axes = plt.subplots(
+            1, n_cols,
+            figsize=(7.5 * n_cols, 5.5),
+        )
+        # Ensure axes is always iterable even for n_cols == 1
+        axes_flat = np.array(axes).flatten()
+
+        for ax_idx, metric in enumerate(group_metrics):
+            ax    = axes_flat[ax_idx]
+            label = METRIC_LABELS.get(metric, metric)
+
+            for subreddit in subreddits:
+                series = _extract_series(agg, subreddit, metric, subreddit_col, time_col)
+                if series.empty:
+                    continue
+
+                color = color_map[subreddit]
+                short = str(subreddit).replace("subreddit-", "r/")
+
+                # Raw monthly mean (faint background)
+                ax.plot(
+                    series.index, series.values,
+                    color=color, alpha=0.30, linewidth=1.2,
+                )
+
+                # Regression row for this (subreddit, metric)
+                mask = (results["subreddit"] == subreddit) & (results["metric"] == metric)
+                row  = results[mask]
+                if row.empty or pd.isna(row["beta_1"].values[0]):
+                    continue
+
+                b1   = row["beta_1"].values[0]   # slope
+                b0   = row["beta_0"].values[0]   # intercept
+                pval = row["p_value"].values[0]
+                sig  = bool(row["significant"].values[0])
+
+                t     = np.arange(len(series), dtype=float)
+                y_hat = b0 + b1 * t
+
+                linestyle = "-" if sig else "--"
+                ax.plot(
+                    series.index, y_hat,
+                    color=color, linewidth=2.2, linestyle=linestyle,
+                    label=f"{short}  β₁={b1:+.4f}  p={pval:.3f}{'*' if sig else ''}",
+                )
+
+            ax.set_title(label, fontsize=14, fontweight="bold", pad=8)
+            ax.set_xlabel("Month", fontsize=12)
+            ax.tick_params(axis="x", labelsize=10, rotation=30)
+            ax.tick_params(axis="y", labelsize=10)
+            ax.legend(fontsize=9.5, framealpha=0.88)
+
+        fig.suptitle(
+            f"OLS Trend Regression — Lexical {group_label}\n"
+            "Model: y_t = β₀ + β₁·t + ε_t  (Newey-West HAC SEs)  ·  "
+            "Solid = significant at α=0.05  ·  Dashed = not significant",
+            fontsize=13, fontweight="bold",
+        )
+        # Leave deliberate headroom between suptitle and subplot titles
+        fig.tight_layout(rect=[0, 0, 1, 0.88])
+
+        if out_path is not None:
+            fig.savefig(out_path, dpi=150, bbox_inches="tight")
+            print(f"Plot saved to: {out_path}")
+        else:
+            plt.show()
+        plt.close(fig)
+
+    _render_group(div_metrics,  "Diversity",      div_path)
+    _render_group(soph_metrics, "Sophistication", soph_path)
 
 
 # ----------------------------------------------------------------------------------------
