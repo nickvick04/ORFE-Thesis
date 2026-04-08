@@ -320,12 +320,12 @@ def plot_ols_trend_grid(
         if not group_metrics:
             return
 
-        n_cols = len(group_metrics)
+        n_rows = len(group_metrics)
         fig, axes = plt.subplots(
-            1, n_cols,
-            figsize=(7.5 * n_cols, 5.5),
+            n_rows, 1,
+            figsize=(10, 5.0 * n_rows),
         )
-        # Ensure axes is always iterable even for n_cols == 1
+        # Ensure axes is always iterable even for n_rows == 1
         axes_flat = np.array(axes).flatten()
 
         for ax_idx, metric in enumerate(group_metrics):
@@ -379,8 +379,8 @@ def plot_ols_trend_grid(
             "Solid = significant at α=0.05  ·  Dashed = not significant",
             fontsize=13, fontweight="bold",
         )
-        # Leave deliberate headroom between suptitle and subplot titles
-        fig.tight_layout(rect=[0, 0, 1, 0.88])
+        # Leave deliberate headroom between suptitle and the top subplot title
+        fig.tight_layout(rect=[0, 0, 1, 0.94])
 
         if out_path is not None:
             fig.savefig(out_path, dpi=150, bbox_inches="tight")
