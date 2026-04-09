@@ -55,20 +55,20 @@ def plot_lexical_trends_monthly(df, metrics=LEXICAL_METRICS):
     monthly = ts_df[metrics].resample("M").mean()
 
     n = len(metrics)
-    fig, axes = plt.subplots(n, 1, figsize=(14, 3.5 * n), sharex=True)
+    fig, axes = plt.subplots(n, 1, figsize=(14, 4 * n), sharex=True)
     if n == 1:
         axes = [axes]
 
     for i, col in enumerate(metrics):
-        axes[i].plot(monthly.index, monthly[col], color="tab:blue", linewidth=2)
-        axes[i].set_ylabel(METRIC_LABELS.get(col, col))
+        axes[i].plot(monthly.index, monthly[col], color="tab:blue", linewidth=1.8)
+        axes[i].set_ylabel(METRIC_LABELS.get(col, col), fontsize=14, fontweight='bold')
         axes[i].grid(True, alpha=0.3)
 
     axes[-1].xaxis.set_major_locator(mdates.MonthLocator(interval=3))
     axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
     plt.setp(axes[-1].get_xticklabels(), rotation=35, ha="right")
-    axes[-1].set_xlabel("Month")
-    fig.suptitle("Monthly Lexical Complexity Trends", fontsize=16)
+    axes[-1].set_xlabel("Month", fontsize=14, fontweight='bold')
+    fig.suptitle("Monthly Lexical Complexity Trends", fontsize=16, fontweight='bold')
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.show()
 
@@ -79,20 +79,20 @@ def plot_lexical_trends_yearly(df, metrics=LEXICAL_METRICS):
     yearly = ts_df[metrics].resample("Y").mean()
 
     n = len(metrics)
-    fig, axes = plt.subplots(n, 1, figsize=(14, 3.5 * n), sharex=True)
+    fig, axes = plt.subplots(n, 1, figsize=(14, 4 * n), sharex=True)
     if n == 1:
         axes = [axes]
 
     for i, col in enumerate(metrics):
-        axes[i].plot(yearly.index, yearly[col], color="tab:green", linewidth=2)
-        axes[i].set_ylabel(METRIC_LABELS.get(col, col))
+        axes[i].plot(yearly.index, yearly[col], color="tab:green", linewidth=1.8)
+        axes[i].set_ylabel(METRIC_LABELS.get(col, col), fontsize=14, fontweight='bold')
         axes[i].grid(True, alpha=0.3)
 
     axes[-1].xaxis.set_major_locator(mdates.YearLocator())
     axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     plt.setp(axes[-1].get_xticklabels(), rotation=35, ha="right")
-    axes[-1].set_xlabel("Year")
-    fig.suptitle("Yearly Lexical Complexity Trends", fontsize=16)
+    axes[-1].set_xlabel("Year", fontsize=14, fontweight='bold')
+    fig.suptitle("Yearly Lexical Complexity Trends", fontsize=16, fontweight='bold')
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.show()
 
@@ -135,7 +135,7 @@ def plot_complexity_by_user_frequency_over_time(df, metrics=LEXICAL_METRICS, fre
 
     bucket_order = ts_df["frequency_bucket"].cat.categories.tolist()
     n = len(metrics)
-    fig, axes = plt.subplots(n, 1, figsize=(14, 3.8 * n), sharex=True)
+    fig, axes = plt.subplots(n, 1, figsize=(14, 4 * n), sharex=True)
     if n == 1:
         axes = [axes]
 
@@ -143,7 +143,7 @@ def plot_complexity_by_user_frequency_over_time(df, metrics=LEXICAL_METRICS, fre
         for b in bucket_order:
             subset = grouped[grouped["frequency_bucket"].astype(str) == b]
             axes[i].plot(subset["timestamp"], subset[col], linewidth=1.8, label=b)
-        axes[i].set_ylabel(METRIC_LABELS.get(col, col))
+        axes[i].set_ylabel(METRIC_LABELS.get(col, col), fontsize=14, fontweight='bold')
         axes[i].grid(True, alpha=0.3)
         axes[i].legend(title="Posts/User", ncol=3, fontsize=9)
 
@@ -154,8 +154,8 @@ def plot_complexity_by_user_frequency_over_time(df, metrics=LEXICAL_METRICS, fre
         axes[-1].xaxis.set_major_locator(mdates.YearLocator())
         axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     plt.setp(axes[-1].get_xticklabels(), rotation=35, ha="right")
-    axes[-1].set_xlabel("Time")
-    fig.suptitle("Lexical Complexity Over Time by User Frequency Group", fontsize=16)
+    axes[-1].set_xlabel("Time", fontsize=14, fontweight='bold')
+    fig.suptitle("Lexical Complexity Over Time by User Frequency Group", fontsize=16, fontweight='bold')
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.show()
 
@@ -183,7 +183,7 @@ def plot_complexity_by_user_frequency(df, metrics=LEXICAL_METRICS, bins=10):
     grouped.index = grouped.index.astype(str)
 
     n = len(metrics)
-    fig, axes = plt.subplots(n, 1, figsize=(14, 3.8 * n), sharex=True)
+    fig, axes = plt.subplots(n, 1, figsize=(14, 4 * n), sharex=True)
     if n == 1:
         axes = [axes]
 
@@ -194,12 +194,15 @@ def plot_complexity_by_user_frequency(df, metrics=LEXICAL_METRICS, bins=10):
             ax=axes[i],
             color="tab:orange",
         )
-        axes[i].set_ylabel(METRIC_LABELS.get(col, col))
+        axes[i].set_ylabel(METRIC_LABELS.get(col, col), fontsize=14, fontweight='bold')
         axes[i].grid(True, axis="y", alpha=0.3)
 
-    axes[-1].set_xlabel("User Frequency Bucket (quantiles of num_utterances_by_speaker)")
+    axes[-1].set_xlabel(
+        "User Frequency Bucket (quantiles of num_utterances_by_speaker)",
+        fontsize=14, fontweight='bold',
+    )
     axes[-1].tick_params(axis="x", rotation=35)
-    fig.suptitle("Average Lexical Complexity by User Posting Frequency", fontsize=16)
+    fig.suptitle("Average Lexical Complexity by User Posting Frequency", fontsize=16, fontweight='bold')
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.show()
 
@@ -281,18 +284,109 @@ def plot_lexical_metrics(df, metrics=LEXICAL_METRICS, rolling_window=None, resam
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.show()
 
+def plot_lexical_metrics_by_subreddit(df, metrics=LEXICAL_METRICS, rolling_window=None, resample_freq=None, agg='mean'):
+    '''Plots lexical metrics over time with one line per subreddit on each subplot.
+
+    Mirrors plot_lexical_metrics exactly in layout and formatting, adding a
+    per-subreddit colour split so communities can be compared directly.
+
+    Parameters:
+    - metrics: list of metric column names to plot (default: LEXICAL_METRICS).
+    - rolling_window: int for size of rolling average window (post count).
+      The band shows ±1.96 * (rolling SD / sqrt(rolling n)) at each point.
+    - resample_freq: str, e.g., 'D', 'W', 'M' to aggregate metrics over time.
+      The band shows ±1.96 * (SD / sqrt(n)) within each period.
+    - agg: str, 'mean' (default) or 'median'. CI bands only available for 'mean'.
+
+    Requires a 'subreddit' column in df.'''
+
+    if agg not in ('mean', 'median'):
+        raise ValueError("agg must be 'mean' or 'median'")
+    if 'subreddit' not in df.columns:
+        raise ValueError("DataFrame must have a 'subreddit' column.")
+
+    ts_df = _with_datetime_index(df)
+    _require_columns(ts_df, metrics)
+
+    subreddits = sorted(ts_df['subreddit'].dropna().unique())
+    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+
+    n = len(metrics)
+    fig, axes = plt.subplots(n, 1, figsize=(14, 4 * n), sharex=True)
+    if n == 1:
+        axes = [axes]
+
+    label = 'raw values'   # updated below if resampling/rolling is used
+
+    for i, col in enumerate(metrics):
+        negate = col in NEGATED_METRICS
+
+        for j, subreddit in enumerate(subreddits):
+            color = colors[j % len(colors)]
+            series = ts_df[ts_df['subreddit'] == subreddit][col]
+            if negate:
+                series = -series
+
+            if resample_freq:
+                if agg == 'mean':
+                    resampled = series.resample(resample_freq).agg(['mean', 'std', 'count'])
+                    central   = resampled['mean']
+                    margin    = 1.96 * resampled['std'] / np.sqrt(resampled['count'])
+                else:
+                    central = series.resample(resample_freq).median()
+                    margin  = None
+                label = f'{resample_freq}-resampled {agg} ± 95% CI' if agg == 'mean' else f'{resample_freq}-resampled {agg}'
+            elif rolling_window:
+                if agg == 'mean':
+                    central   = series.rolling(window=rolling_window, min_periods=1).mean()
+                    roll_std  = series.rolling(window=rolling_window, min_periods=1).std()
+                    roll_n    = series.rolling(window=rolling_window, min_periods=1).count()
+                    margin    = 1.96 * roll_std / np.sqrt(roll_n)
+                else:
+                    central = series.rolling(window=rolling_window, min_periods=1).median()
+                    margin  = None
+                label = f'rolling {agg} ± 95% CI (window={rolling_window})' if agg == 'mean' else f'rolling {agg} (window={rolling_window})'
+            else:
+                central = series
+                margin  = None
+                label   = 'raw values'
+
+            axes[i].plot(central.index, central, color=color, linewidth=1.8, label=subreddit)
+            if margin is not None:
+                axes[i].fill_between(
+                    central.index,
+                    central - margin,
+                    central + margin,
+                    color=color,
+                    alpha=0.15,
+                    linewidth=0,
+                )
+
+        ylabel = METRIC_LABELS.get(col, col)
+        if negate:
+            ylabel = f'−{ylabel}'
+        axes[i].set_ylabel(ylabel, fontsize=14, fontweight='bold')
+        axes[i].grid(True, alpha=0.3)
+        axes[i].legend(fontsize=9, ncol=min(len(subreddits), 4))
+
+    axes[-1].set_xlabel('Time', fontsize=14, fontweight='bold')
+    method_desc = label if (rolling_window or resample_freq) else 'raw'
+    fig.suptitle(f'Lexical Metrics Over Time by Subreddit ({method_desc})', fontsize=16, fontweight='bold')
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    plt.show()
+
 def plot_syntactic_metrics(df, rolling_window=None, resample_freq=None):
     '''Plots all syntactic metrics from a dataframe on one figure with subplots.
     Also takes two other paramters:
     - rolling_window: int for the size of rolling average window
     - resample_freq: str, e.g., 'D', 'W', 'M' to aggregate metrics over time.'''
-    
+
     ts_df = _with_datetime_index(df)
     metrics = SYNTACTIC_METRICS
     _require_columns(ts_df, metrics)
     n = len(metrics)
     fig, axes = plt.subplots(n, 1, figsize=(14, 4*n), sharex=True)
-    
+
     # Determine method description for title
     if resample_freq:
         method_desc = f'{resample_freq}-resampled mean'
@@ -300,7 +394,7 @@ def plot_syntactic_metrics(df, rolling_window=None, resample_freq=None):
         method_desc = f'rolling window={rolling_window}'
     else:
         method_desc = 'raw values'
-    
+
     for i, col in enumerate(metrics):
         if resample_freq:
             series = ts_df[col].resample(resample_freq).mean()
@@ -309,11 +403,11 @@ def plot_syntactic_metrics(df, rolling_window=None, resample_freq=None):
         else:
             series = ts_df[col]
 
-        axes[i].plot(series.index, series, color='tab:green')
-        axes[i].set_ylabel(METRIC_LABELS.get(col, col))
+        axes[i].plot(series.index, series, color='tab:green', linewidth=1.8)
+        axes[i].set_ylabel(METRIC_LABELS.get(col, col), fontsize=14, fontweight='bold')
         axes[i].grid(True, alpha=0.3)
-    
-    axes[-1].set_xlabel('Time')
-    fig.suptitle(f'Syntactic Metrics Over Time ({method_desc})', fontsize=16)
+
+    axes[-1].set_xlabel('Time', fontsize=14, fontweight='bold')
+    fig.suptitle(f'Syntactic Metrics Over Time ({method_desc})', fontsize=16, fontweight='bold')
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.show()
