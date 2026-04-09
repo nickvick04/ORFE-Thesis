@@ -1,0 +1,126 @@
+% ============================================================
+%  Section X.X  Longitudinal User Trajectory Model
+%  Paste into the Methods chapter after Section 6.2 (FE Panel)
+% ============================================================
+
+\subsection{Longitudinal User Trajectory Model}
+\label{sec:longitudinal}
+
+The fixed-effects panel regression of Section~\ref{sec:fe} captures
+within-user variation by asking whether a user's lexical quality is
+higher in months when they post more frequently.  It does not, however,
+address a different and arguably more fundamental question: does
+sustained engagement with Reddit reshape a user's language over the
+long run?  To test this, we propose a longitudinal growth-curve model
+that replaces the calendar time axis with a \emph{user-specific
+exposure clock}, tracking each user from their first observed post
+and modeling lexical quality as a function of their cumulative
+activity history.
+
+\paragraph{Cumulative exposure variables.}
+For user $u$ observed in subreddit $s$ during month $t$, define the
+two exposure measures
+
+\begin{equation}
+  C_{u,t} \;=\; \sum_{\tau \,\leq\, t} n_{u,\tau},
+  \qquad
+  T_{u,t} \;=\; t - t_{u}^{(0)},
+  \label{eq:exposure}
+\end{equation}
+
+where $n_{u,\tau}$ is the number of comments posted by $u$ in month
+$\tau$ (equivalently, \texttt{num\_utterances\_by\_speaker\_month}
+in the combined dataset), and $t_{u}^{(0)}$ is the index of the
+earliest month in which $u$ appears.  $C_{u,t}$ therefore counts
+the total volume of Reddit activity accumulated by $u$ through month
+$t$, while $T_{u,t}$ measures the elapsed \emph{tenure} on the
+platform, irrespective of posting volume.  Including both allows us
+to disentangle the effect of total output from the mere passage of
+time.  Following the convention established in Section~\ref{sec:fe},
+cumulative volume enters the model in log-scale as $\log(1 +
+C_{u,t})$ to handle the heavy right-tail of the post-count
+distribution.
+
+\paragraph{Model specification.}
+Retaining the notation of Sections~\ref{sec:wls}--\ref{sec:me}, the
+longitudinal trajectory model is
+
+\begin{equation}
+  y_{u,s,t}
+  \;=\;
+  \underbrace{\bigl(\mu_{\alpha} + \alpha_{u}\bigr)}_{\text{user intercept}}
+  \;+\;
+  \underbrace{\bigl(\mu_{\beta} + b_{u}\bigr)}_{\text{user slope}}
+  \log\!\bigl(1 + C_{u,t}\bigr)
+  \;+\;
+  \gamma\,T_{u,t}
+  \;+\;
+  \delta\,x_{u,s,t}
+  \;+\;
+  \boldsymbol{\eta}^{\!\top}\mathbf{z}_{u,s,t}
+  \;+\;
+  \varepsilon_{u,s,t},
+  \label{eq:longitudinal}
+\end{equation}
+
+where
+
+\begin{itemize}
+  \item $\mu_{\alpha}$ is the population-level intercept and
+        $\alpha_{u} \sim \mathcal{N}(0,\,\sigma_{\alpha}^{2})$ is a
+        user-level random intercept absorbing all time-invariant
+        heterogeneity (e.g.\ baseline vocabulary, educational
+        background, native language);
+
+  \item $\mu_{\beta}$ is the \emph{average} effect of log-cumulative
+        exposure on lexical quality---the parameter of primary
+        interest---and $b_{u} \sim \mathcal{N}(0,\,\sigma_{b}^{2})$
+        is a user-level random slope that allows individual
+        trajectories to diverge from the population mean;
+
+  \item $[\alpha_{u},\, b_{u}]^{\top} \sim
+        \mathcal{N}\!\left(\mathbf{0},\,\boldsymbol{\Sigma}\right)$
+        with $\boldsymbol{\Sigma}$ estimated freely, permitting
+        correlation between a user's baseline quality and their
+        rate of change;
+
+  \item $\gamma$ captures any residual effect of tenure net of
+        cumulative posting volume;
+
+  \item $x_{u,s,t} = \log(1 + n_{u,t})$ is the current-month
+        log-comment count (as defined in Section~\ref{sec:wls}),
+        included to control for contemporaneous posting intensity;
+
+  \item $\mathbf{z}_{u,s,t}$ is the vector of comment-level
+        controls---post depth, edited status, Reddit score, number
+        of direct replies, and controversiality---defined in
+        Section~\ref{sec:wls};
+
+  \item $\varepsilon_{u,s,t} \overset{\mathrm{iid}}{\sim}
+        \mathcal{N}(0,\,\sigma^{2})$.
+\end{itemize}
+
+The model is estimated separately for each of the six lexical quality
+metrics via restricted maximum likelihood (REML), fitting one model
+per metric pooled across all subreddits with subreddit fixed effects
+absorbed into the intercept.  Only users with at least
+$m_{\min} = 6$ months of observed data are included, ensuring that
+individual trajectories are identified.  $p$-values for the key
+coefficients $\mu_{\beta}$ and $\gamma$ are adjusted using the
+Benjamini--Hochberg procedure across the six simultaneous tests.
+
+\paragraph{Interpretation.}
+A significantly positive $\hat{\mu}_{\beta}$ for a given metric
+indicates that, on average, users' lexical quality on that dimension
+grows with cumulative Reddit exposure, consistent with a
+practice-makes-perfect hypothesis.  A significantly negative value
+would instead suggest that heavier long-run use is associated with
+declining quality.  The variance component $\sigma_{b}^{2}$ speaks
+to how heterogeneous these trajectories are: large $\sigma_{b}^{2}$
+relative to $\hat{\mu}_{\beta}$ implies that some users improve
+while others decline, and that aggregate conclusions should be
+interpreted cautiously.  The coefficient $\gamma$ isolates any
+effect of time-on-platform beyond posting volume---for instance,
+passive acculturation to community norms---while $\delta$ controls
+for the short-run activity effect already characterized in
+Section~\ref{sec:fe}.
