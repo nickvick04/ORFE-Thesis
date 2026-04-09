@@ -192,7 +192,7 @@ def plot_post_volume(monthly: pd.DataFrame, out_dir: str) -> None:
 
     _apply_shared_style(
         ax,
-        title="Monthly Post Volume by Subreddit",
+        title="Monthly Comment Volume by Subreddit",
         ylabel="Total Comments",
     )
     _add_legend(ax)
